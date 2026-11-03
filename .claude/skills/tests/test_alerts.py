@@ -164,6 +164,55 @@ class Ringing(unittest.TestCase):
         self.assertNotIn("bracket", text.lower())
 
 
+class PriceRings(unittest.TestCase):
+    """The ring messages themselves, which the first pass of this port missed:
+    they were still printing dollar amounts."""
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp()
+        self.cwd = os.getcwd()
+        os.chdir(self.d)
+        os.makedirs(os.path.join("trader", "state"))
+
+    def tearDown(self):
+        os.chdir(self.cwd)
+        shutil.rmtree(self.d)
+
+    def _rules(self, *rules):
+        with open(os.path.join("trader", "alerts.json"), "w") as fh:
+            json.dump({"rules": list(rules)}, fh)
+
+    def test_a_stop_alert_rings_in_rupees(self):
+        # the TCS fixture's last close is above 4000, so a 4100 "below" fires
+        self._rules({"id": "tcs-stop", "symbol": "TCS", "type": "below", "price": 4100.0})
+        code, text, err = run("check", "--adapter", "offline", "--data", INDIA_FIX,
+                              "--now", "2026-11-02 15:00")
+        self.assertIn("TCS", text)
+        self.assertIn("\u20b9", text)
+        self.assertNotIn("$", text)
+
+    def test_a_pct_move_alert_rings_in_rupees(self):
+        self._rules({"id": "tcs-pct", "symbol": "TCS", "type": "pct_move", "pct": 0.01})
+        code, text, _ = run("check", "--adapter", "offline", "--data", INDIA_FIX,
+                            "--now", "2026-11-02 15:00")
+        self.assertIn("moved", text)
+        self.assertIn("\u20b9", text)
+        self.assertNotIn("$", text)
+
+    def test_the_quote_command_prints_rupees(self):
+        code, text, err = run("quote", "TCS", "--adapter", "offline", "--data", INDIA_FIX,
+                              "--now", "2026-11-02 15:00")
+        self.assertEqual(code, 0, err)
+        self.assertIn("\u20b9", text)
+        self.assertNotIn("$", text)
+
+    def test_no_dollar_format_survives_in_the_script(self):
+        src = open(os.path.join(ROOT, "trader-alerts", "alerts.py"), encoding="utf-8").read()
+        import re as _re
+        self.assertIsNone(_re.search(r'\$%[.0-9]*[sfd]', src),
+                          "a dollar format string is still in alerts.py")
+
+
 class Quotes(unittest.TestCase):
     def test_quotes_come_through_the_adapter_in_rupees(self):
         quotes, failed = al.get_quotes(["TCS"], source="offline", offline=INDIA_FIX, pause=0)

@@ -126,12 +126,19 @@ class Repo(unittest.TestCase):
     def test_day_trading_limits_ship_in_the_example_config(self):
         with open(os.path.join(ROOT, "trader-budget", "config.example.json")) as fh:
             cfg = json.load(fh)
-        for k in ("max_loss_per_trade_usd", "max_daily_loss_usd", "max_trades_per_day",
-                  "min_reward_risk", "require_stop", "no_entries_after", "flat_by"):
+        for k in ("max_loss_per_trade_inr", "max_daily_loss_inr", "max_loss_includes_costs",
+                  "max_trades_per_day", "min_reward_risk", "require_stop",
+                  "no_entries_after", "flat_by", "exchange", "product", "broker"):
             self.assertIn(k, cfg, k)
         self.assertIs(cfg["require_stop"], True)
+        self.assertIs(cfg["max_loss_includes_costs"], True)   # charges count by default
         self.assertIs(cfg.get("allow_short", False), False)
         self.assertIs(cfg.get("allow_margin", False), False)
+        self.assertEqual(cfg["product"], "MIS")
+        self.assertEqual(cfg["broker"], "kite")
+        # no US key survives
+        for gone in ("max_loss_per_trade_usd", "pdt_guard", "fractional", "sec_user_agent"):
+            self.assertNotIn(gone, cfg, gone)
 
     def test_paper_trading_is_the_default(self):
         with open(os.path.join(ROOT, "trader-budget", "config.example.json")) as fh:

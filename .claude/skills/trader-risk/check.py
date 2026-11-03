@@ -425,9 +425,7 @@ def check(orders, cfg, portfolio=None, prices=None, state=None, today=None, now=
                 v = _f(o.get(k))
                 if v is None or v <= 0:
                     reasons.append("format: %s must be a positive number, got %r" % (k, o.get(k)))
-                elif not isinstance(o.get(k), str):
-                    warns.append("send %s as a string (\"%s\"), the way place_stock_order types it"
-                                 % (k, o.get(k)))
+
         if typ not in ("market", "limit"):
             reasons.append("format: an entry is market or limit, got %r" % typ)
         if product not in PRODUCTS:

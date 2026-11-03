@@ -45,7 +45,6 @@ if _ROOT not in sys.path:
 from config import brokers, costs as inr_costs, india_market as mkt
 
 ORDER_FIELDS = brokers.KITE_FIELDS
-ALPACA_FIELDS = ORDER_FIELDS          # kept so nothing else has to change
 # Kite types quantity as an int and prices as numbers, so nothing is
 # stringified the way Alpaca's signature wanted.
 STRING_FIELDS = ()
@@ -151,7 +150,7 @@ def tool_input(order):
     numbers as strings (its signature types qty, notional and prices as str).
     "why" and "plan" are ours and are never sent."""
     out = {}
-    for k in ALPACA_FIELDS:
+    for k in ORDER_FIELDS:
         if k in order and order[k] is not None:
             out[k] = _str_num(order[k]) if k in STRING_FIELDS else order[k]
     return out

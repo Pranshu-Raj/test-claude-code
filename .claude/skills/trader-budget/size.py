@@ -762,7 +762,7 @@ def size(rows, cfg, budget=None, prices=None, whole=None, cents=False, top=None)
 
 
 def orders_from(result, source=""):
-    """Weights mode: proposed buy orders, one per position, in place_stock_order shape."""
+    """Weights mode: proposed buy orders, one per position, in the broker's order shape."""
     out = []
     for p in result["positions"]:
         if p["dollars"] <= 0:
@@ -815,7 +815,7 @@ def report(result, orders, source=""):
     for d in r["dropped"]:
         lines.append("Dropped %s: %s" % (d["ticker"], d["reason"]))
     lines.append("")
-    lines.append("Proposed orders (place_stock_order arguments, nothing has been placed):")
+    lines.append("Proposed orders (broker place-order arguments, nothing has been placed):")
     for o in orders:
         amount = ("notional \"%s\"" % o["notional"]) if "notional" in o else ("qty \"%s\"" % o["qty"])
         lines.append("  %s %s %s, %s, %s" % (o["side"], o["symbol"], amount, o["type"], o["time_in_force"]))
