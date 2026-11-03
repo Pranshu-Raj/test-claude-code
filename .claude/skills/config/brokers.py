@@ -134,3 +134,42 @@ PRODUCT_MAP = {
 
 def product_for(broker, kind="intraday"):
     return PRODUCT_MAP.get(broker, PRODUCT_MAP[KITE]).get(kind)
+
+
+def fingerprint(order):
+    """A stable id for THIS exact order, legs included.
+
+    trader-risk records a verdict against it and trader-broker will only show
+    an order as ready if the fingerprint matches, so the two must compute it
+    the same way. It lives here, imported by both, so they cannot drift.
+
+    It must cover everything that changes what gets sent: the symbol, side,
+    quantity, order type, venue and product, the entry limit, and every leg's
+    own parameters. Change any of those and the order has to pass risk again.
+    """
+    import hashlib
+    import json
+
+    def _num(v):
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return v
+        return int(f) if f == int(f) else round(f, 4)
+
+    top = {}
+    for k in ("symbol", "side", "qty", "type", "product", "exchange", "validity",
+              "limit_price", "stop_trigger_price", "target_limit_price"):
+        v = order.get(k)
+        if v is not None:
+            top[k] = _num(v) if k != "symbol" else mkt.normalise_symbol(v)
+    legs = []
+    for leg in (order.get("legs") or []):
+        if not isinstance(leg, dict):
+            continue
+        prm = leg.get("params") or {}
+        legs.append({"role": str(leg.get("role") or ""),
+                     "params": dict((k, _num(prm[k])) for k in sorted(prm) if prm[k] is not None)})
+    legs.sort(key=lambda l: l["role"])
+    blob = json.dumps({"order": top, "legs": legs}, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
