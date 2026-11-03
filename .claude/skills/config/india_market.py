@@ -124,28 +124,37 @@ HOLIDAY_FILE = os.path.join(_DATA, "nse_holidays.csv")
 SPECIAL_FILE = os.path.join(_DATA, "nse_special_sessions.csv")
 
 
-def _read_csv(path):
+def _read_csv(path, require=None):
+    """Rows of a data file, comment lines dropped.
+
+    require: a column that must be non-empty for the row to count, so one
+    reader can serve files with different shapes.
+    """
     if not os.path.exists(path):
         return []
     with open(path, encoding="utf-8") as fh:
         rows = [r for r in csv.DictReader(ln for ln in fh if not ln.lstrip().startswith("#"))]
-    return [r for r in rows if r.get("date")]
+    if require:
+        rows = [r for r in rows if (r.get(require) or "").strip()]
+    return rows
 
 
 def load_holidays(path=None):
     """{date_iso: name}. VERIFY the file itself: see its header."""
-    return dict((r["date"], r.get("name") or "holiday") for r in _read_csv(path or HOLIDAY_FILE))
+    return dict((r["date"], r.get("name") or "holiday")
+                for r in _read_csv(path or HOLIDAY_FILE, "date"))
 
 
 def holiday_confidence(path=None):
     """{date_iso: 'fixed'|'estimate'}. 'estimate' dates are NOT authoritative."""
-    return dict((r["date"], (r.get("confidence") or "estimate")) for r in _read_csv(path or HOLIDAY_FILE))
+    return dict((r["date"], (r.get("confidence") or "estimate"))
+                for r in _read_csv(path or HOLIDAY_FILE, "date"))
 
 
 def load_special_sessions(path=None):
     """{date_iso: {'name','kind','open','close'}} for Muhurat and the like."""
     out = {}
-    for r in _read_csv(path or SPECIAL_FILE):
+    for r in _read_csv(path or SPECIAL_FILE, "date"):
         out[r["date"]] = {"name": r.get("name") or "", "kind": r.get("kind") or "special",
                           "open": r.get("open") or "", "close": r.get("close") or ""}
     return out
@@ -199,6 +208,55 @@ def session(d, holidays=None):
 def _parse_hhmm(text):
     h, m = str(text).strip().split(":")[:2]
     return datetime.time(int(h), int(m))
+
+
+UNIVERSE_FILE = os.path.join(_DATA, "nse_universe.csv")
+
+KNOWN_INDICES = ("nifty50", "nifty500", "fno")
+
+
+def load_universe(path=None):
+    """[{symbol, name, sector, indices, band_pct, confidence}], from the data file.
+
+    VERIFY the file: index membership changes at every review, and the shipped
+    rows were written from memory, not downloaded. Every row says so.
+    """
+    out = []
+    for r in _read_csv(path or UNIVERSE_FILE, "symbol"):
+        sym = normalise_symbol(r.get("symbol"))
+        if not sym:
+            continue
+        band = (r.get("band_pct") or "").strip()
+        out.append({"symbol": sym, "name": (r.get("name") or "").strip(),
+                    "sector": (r.get("sector") or "").strip().lower(),
+                    "indices": [i for i in (r.get("indices") or "").lower().split("|") if i],
+                    "band_pct": float(band) if band else None,
+                    "confidence": (r.get("confidence") or "estimate").strip()})
+    return out
+
+
+def universe_symbols(index=None, sector=None, path=None):
+    """Symbols in an index (nifty50, nifty500, fno) and/or a sector."""
+    rows = load_universe(path)
+    if index:
+        key = str(index).lower().replace(" ", "").replace("-", "")
+        rows = [r for r in rows if key in r["indices"]]
+    if sector:
+        want = str(sector).lower()
+        rows = [r for r in rows if r["sector"] == want]
+    return [r["symbol"] for r in rows]
+
+
+def universe_warning(path=None):
+    """A sentence when the shipped universe has not been replaced, else ''."""
+    rows = load_universe(path)
+    est = [r for r in rows if r["confidence"] != "verified"]
+    if est:
+        return ("The NSE universe in config/data/nse_universe.csv is a template written "
+                "from memory, not downloaded: %d of %d rows are unverified, and index "
+                "membership changes at every review. Replace it from niftyindices.com "
+                "and NSE before relying on a scan." % (len(est), len(rows)))
+    return ""
 
 
 # ---------------------------------------------------------------- currency
@@ -480,6 +538,7 @@ def verify_list():
         ("settlement", "SETTLEMENT_CYCLE", "SEBI T+1 circular"),
         ("shorting", "INTRADAY_SHORT_ALLOWED, OVERNIGHT_SHORT_ALLOWED_CASH", "SEBI short-selling framework"),
         ("benchmarks", "BENCHMARKS symbol map", "Yahoo Finance index symbols"),
+        ("universe", "data/nse_universe.csv (every row and band)", "niftyindices.com, NSE EQUITY_L.csv, NSE price bands"),
     ] + [("costs", "COSTS[%r]" % k, "see the comment on that line") for k in sorted(COSTS)]
 
 

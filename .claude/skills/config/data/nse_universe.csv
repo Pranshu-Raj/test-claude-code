@@ -1,0 +1,77 @@
+# NSE equity universe for trader-scanner.
+#
+# VERIFY THIS WHOLE FILE. Index constituents change at every review, and a
+# stale list silently scans the wrong stocks. Replace it from the official
+# source before you rely on it:
+#   NIFTY indices: https://www.niftyindices.com (index factsheets, constituents)
+#   All NSE equities: https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv
+#   F&O eligible:    NSE circular, "Securities permitted in F&O segment"
+#
+# symbol   the NSE trading symbol, which is the canonical form in these skills
+# name     for display only
+# sector   free text, used by the --sector filter
+# indices  pipe separated; nifty50, nifty500 and fno are the ones the scanner
+#          knows. A symbol may be in several.
+# band_pct the daily price band, if you know it. Leave blank when you do not:
+#          blank means the circuit filter cannot judge that stock and says so.
+#          F&O names have no fixed band, so they are left blank here.
+#
+# confidence=estimate on every row: this list is written from memory, not
+# downloaded, because the environment this port was built in cannot reach
+# nseindia.com. Treat it as a starting template, not a source of truth.
+symbol,name,sector,indices,band_pct,confidence
+RELIANCE,Reliance Industries,energy,nifty50|nifty500|fno,,estimate
+TCS,Tata Consultancy Services,it,nifty50|nifty500|fno,,estimate
+HDFCBANK,HDFC Bank,financials,nifty50|nifty500|fno,,estimate
+ICICIBANK,ICICI Bank,financials,nifty50|nifty500|fno,,estimate
+INFY,Infosys,it,nifty50|nifty500|fno,,estimate
+HINDUNILVR,Hindustan Unilever,fmcg,nifty50|nifty500|fno,,estimate
+ITC,ITC,fmcg,nifty50|nifty500|fno,,estimate
+SBIN,State Bank of India,financials,nifty50|nifty500|fno,,estimate
+BHARTIARTL,Bharti Airtel,telecom,nifty50|nifty500|fno,,estimate
+KOTAKBANK,Kotak Mahindra Bank,financials,nifty50|nifty500|fno,,estimate
+LT,Larsen and Toubro,construction,nifty50|nifty500|fno,,estimate
+AXISBANK,Axis Bank,financials,nifty50|nifty500|fno,,estimate
+MARUTI,Maruti Suzuki India,auto,nifty50|nifty500|fno,,estimate
+ASIANPAINT,Asian Paints,materials,nifty50|nifty500|fno,,estimate
+BAJFINANCE,Bajaj Finance,financials,nifty50|nifty500|fno,,estimate
+HCLTECH,HCL Technologies,it,nifty50|nifty500|fno,,estimate
+SUNPHARMA,Sun Pharmaceutical,pharma,nifty50|nifty500|fno,,estimate
+TITAN,Titan Company,consumer,nifty50|nifty500|fno,,estimate
+ULTRACEMCO,UltraTech Cement,materials,nifty50|nifty500|fno,,estimate
+WIPRO,Wipro,it,nifty50|nifty500|fno,,estimate
+NESTLEIND,Nestle India,fmcg,nifty50|nifty500|fno,,estimate
+POWERGRID,Power Grid Corporation,utilities,nifty50|nifty500|fno,,estimate
+NTPC,NTPC,utilities,nifty50|nifty500|fno,,estimate
+TATAMOTORS,Tata Motors,auto,nifty50|nifty500|fno,,estimate
+TATASTEEL,Tata Steel,metals,nifty50|nifty500|fno,,estimate
+JSWSTEEL,JSW Steel,metals,nifty50|nifty500|fno,,estimate
+ADANIENT,Adani Enterprises,conglomerate,nifty50|nifty500|fno,,estimate
+ADANIPORTS,Adani Ports and SEZ,infrastructure,nifty50|nifty500|fno,,estimate
+COALINDIA,Coal India,energy,nifty50|nifty500|fno,,estimate
+ONGC,Oil and Natural Gas Corporation,energy,nifty50|nifty500|fno,,estimate
+BAJAJFINSV,Bajaj Finserv,financials,nifty50|nifty500|fno,,estimate
+GRASIM,Grasim Industries,materials,nifty50|nifty500|fno,,estimate
+CIPLA,Cipla,pharma,nifty50|nifty500|fno,,estimate
+DRREDDY,Dr Reddys Laboratories,pharma,nifty50|nifty500|fno,,estimate
+EICHERMOT,Eicher Motors,auto,nifty50|nifty500|fno,,estimate
+HEROMOTOCO,Hero MotoCorp,auto,nifty50|nifty500|fno,,estimate
+BAJAJ-AUTO,Bajaj Auto,auto,nifty50|nifty500|fno,,estimate
+BRITANNIA,Britannia Industries,fmcg,nifty50|nifty500|fno,,estimate
+DIVISLAB,Divis Laboratories,pharma,nifty50|nifty500|fno,,estimate
+TECHM,Tech Mahindra,it,nifty50|nifty500|fno,,estimate
+INDUSINDBK,IndusInd Bank,financials,nifty50|nifty500|fno,,estimate
+APOLLOHOSP,Apollo Hospitals,healthcare,nifty50|nifty500|fno,,estimate
+TATACONSUM,Tata Consumer Products,fmcg,nifty50|nifty500|fno,,estimate
+HINDALCO,Hindalco Industries,metals,nifty50|nifty500|fno,,estimate
+SBILIFE,SBI Life Insurance,insurance,nifty50|nifty500|fno,,estimate
+HDFCLIFE,HDFC Life Insurance,insurance,nifty50|nifty500|fno,,estimate
+SHRIRAMFIN,Shriram Finance,financials,nifty50|nifty500|fno,,estimate
+M&M,Mahindra and Mahindra,auto,nifty50|nifty500|fno,,estimate
+LTIM,LTIMindtree,it,nifty50|nifty500|fno,,estimate
+TRENT,Trent,retail,nifty50|nifty500|fno,,estimate
+# A few names outside NIFTY 50 that DO carry a band, so the circuit filter has
+# something to work with. VERIFY each band against NSE's daily price-bands file.
+SUZLON,Suzlon Energy,energy,nifty500,10,estimate
+IDEA,Vodafone Idea,telecom,nifty500,10,estimate
+YESBANK,Yes Bank,financials,nifty500,10,estimate

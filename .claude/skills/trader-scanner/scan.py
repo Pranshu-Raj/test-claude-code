@@ -1,71 +1,41 @@
 #!/usr/bin/env python3
-"""Chart Scanner for trader-scanner: scan thousands of charts for setups. Standard library only.
+"""Chart Scanner for trader-scanner: scans the NSE universe for setups.
+Indian cash equity intraday, IST. Standard library only. It never places an
+order.
 
-    python3 scan.py universe                          # Nasdaq Trader lists -> trader/universe.txt
-    python3 scan.py daily                             # before the open: daily setups -> trader/watchlist.json
-    python3 scan.py daily --symbols TSLA,NVDA,AMD     # or --watchlist FILE, or --limit 200
-    python3 scan.py orb                               # after 9:50 AM ET: opening-range breakouts so far
-    python3 scan.py orb --at 10:15 --or-minutes 15    # cut the clock at 10:15 AM ET
-    python3 scan.py orb --offline wall5m.json.gz --now "2026-10-19 10:15" --min-price 0
+    python3 scan.py universe                                 # the universe -> trader/universe.txt
+    python3 scan.py universe --index nifty50 --sector auto
+    python3 scan.py daily                                    # pre-open scan of daily closes
+    python3 scan.py orb --at 10:15                           # opening-range breakouts so far
+    python3 scan.py orb --adapter offline --data DIR
 
-universe  Downloads Nasdaq Trader's symbol directories (nasdaqlisted.txt and
-          otherlisted.txt) and keeps US-listed common stocks, ordinary shares
-          and ADRs. The rule, in order:
-            1. not a test issue, not an ETF, not NextShares
-            2. a plain ticker: 1 to 5 letters, or 1 to 4 letters plus one
-               class letter after a dot (BRK.B); a .U / .W / .R suffix
-               (units, warrants, rights) is out, and so is a $ preferred
-            3. out, whatever else the name says: warrants; SPAC units and
-               rights ("Units, each consisting of", "Rights to receive");
-               notes, ETNs, debentures; a % coupon; "Depositary Shares" that
-               are not American or Global (those carry a preferred)
-            4. in: the name calls it common stock / shares / units, ordinary
-               shares, shares of beneficial interest, ADS / ADR / American or
-               Global depositary shares, or partnership / trust units
-            5. out: the name still says unit, right, bond, preferred or preference
-            6. in: everything else (plain names like "AMETEK, Inc.")
+The universe comes from config/data/nse_universe.csv, which you edit: index
+membership (nifty50, nifty500, fno), sector, and the daily price band where
+you know it. The US version downloaded Nasdaq Trader's symbol directories;
+there is no equivalent single free file for NSE, so the list is yours to
+maintain and every shipped row is marked unverified until you replace it.
 
-daily     Pre-market scan of daily CLOSES (Yahoo spark: 20 symbols a request,
-          3 months of 1-day bars, closes only). Liquidity from the spark meta:
-          regularMarketPrice >= --min-price (5) and regularMarketVolume >=
-          --min-volume (1,000,000). Setups, from closes only:
-            breakout_20d     the last close is above every close of the 20 before it
-            bull_flag        up more than 10 % over the 10 sessions before the
-                             last 5, then the last 5 closes inside a 5 % range
-            reclaim_ma20     closed under the 20-day average, then closed above it
-            oversold         RSI 14 (Wilder) under 30
-            oversold_bounce  RSI 14 was under 30 yesterday and today closed up
-          Today's daily bar is dropped until the session's close.
+Setups, all computed here and not by any model:
 
-orb       Opening-range breakouts, 5-minute bars. The range is the first
-          --or-minutes (15) of the session. Stage 1: spark closes for every
-          symbol (1 day of 5-minute bars, 20 a request); a chart goes on only
-          if a completed bar after the range closed at or above the highest
-          close of the range (a necessary condition). Stage 2: each candidate's
-          v8 chart (real highs and lows): range high = the highest high of the
-          range bars, a hit = the first completed bar to CLOSE above it, at that
-          bar's close time. Stage 2 fetches at most --max-confirm (200) charts,
-          the most traded candidates first (price x volume so far), and says
-          so when it stops short. A chart is usable only when every 5-minute
-          bar from 9:30 to the cutoff is there (a missing bar is a halt or no
-          trades). Floors: --min-price 5 (last close), --min-volume 0.
+  daily (on daily closes, before the open)
+    breakout_20d     closed above its highest close of the last 20 sessions
+    bull_flag        a strong run, then a shallow pause that holds
+    reclaim_ma20     closed under the 20-day average, then back above it
+    oversold         RSI 14 (Wilder) under 30
+    oversold_bounce  RSI was under 30 yesterday and today closed up
+    gap_up/gap_down  opened clear of yesterday's close by --gap percent
 
-Bars: null closes are dropped, a bar off the 5-minute grid (the live tick,
-like 10:49:45) is dropped, and a bar counts only once it is complete
-(start + 5 minutes <= the clock). Times are New York (ET). --now pins the
-clock ("2026-10-19 10:15", New York time; ...Z for UTC).
+  intraday
+    orb              closed above the 09:15 opening range, on 5-minute bars
 
-Yahoo's endpoints are free, unofficial and can lag. query2 first, query1 on
-a 429 or 5xx, one retry after a pause on a 429. A polite pause between
-requests (--pause). Partial results are reported as partial.
-
---offline PATH reads files instead of the network: universe wants a folder
-with nasdaqlisted.txt and otherlisted.txt; daily and orb take a folder of
-<T>.json v8 chart files or spark responses, or one file that is a spark
-response, a v8 chart, or a bundle {"TSLA": <v8 json>, ...}. .json.gz is fine.
+CIRCUIT LIMITS, which have no US equivalent. A stock at or near its daily
+price band cannot move the way a breakout needs, so the scanner SKIPS it and
+counts it separately. It can only do that for symbols whose band you have
+filled in; the rest are scanned and reported as band-unknown, never silently
+treated as clear.
 
 A scan is a list of charts that match a rule, not a list of stocks to buy.
-Exit code 0 when the scan found something, 1 when it did not or could not run.
+Day trading loses most people money.
 """
 
 import argparse
@@ -79,53 +49,27 @@ import time
 import urllib.error
 import urllib.request
 
-UA = "Mozilla/5.0 (compatible; day-trader-skill/2.0; +https://github.com/Jakeschincariol/day-trader-skill)"
-YAHOO_HOSTS = ("https://query2.finance.yahoo.com", "https://query1.finance.yahoo.com")
-NASDAQ_FILES = ("nasdaqlisted.txt", "otherlisted.txt")
-NASDAQ_URL = "https://www.nasdaqtrader.com/dynamic/SymDir/"
-SPARK_MAX = 20      # Yahoo's spark answers 400 above 20 symbols
-PAUSE = 0.3         # seconds between requests: be polite to free endpoints
-BACKOFF = 5.0       # seconds to wait before the one retry after a 429
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
+from config import datasource as ds, india_market as mkt
+
+SPARK_MAX = 20
+PAUSE = 0.3
+BACKOFF = 5.0
 SLEEP = time.sleep  # tests swap this out
 BAR_MIN = 5
 MAX_CONFIRM = 200   # stage-2 v8 charts per orb scan, most traded first
 MIN_DAILY_BARS = 30
 DEFAULT_UNIVERSE = "trader/universe.txt"
 NOTE = "A scan is a list of charts that match a rule, not a list of stocks to buy."
-
-NYSE_HOLIDAYS = {
-    "2026-01-01": "New Year's Day",
-    "2026-01-19": "Martin Luther King, Jr. Day",
-    "2026-02-16": "Washington's Birthday",
-    "2026-04-03": "Good Friday",
-    "2026-05-25": "Memorial Day",
-    "2026-06-19": "Juneteenth National Independence Day",
-    "2026-07-03": "Independence Day (observed)",
-    "2026-09-07": "Labor Day",
-    "2026-11-26": "Thanksgiving Day",
-    "2026-12-25": "Christmas Day",
-    "2027-01-01": "New Year's Day",
-    "2027-01-18": "Martin Luther King, Jr. Day",
-    "2027-02-15": "Washington's Birthday",
-    "2027-03-26": "Good Friday",
-    "2027-05-31": "Memorial Day",
-    "2027-06-18": "Juneteenth National Independence Day (observed)",
-    "2027-07-05": "Independence Day (observed)",
-    "2027-09-06": "Labor Day",
-    "2027-11-25": "Thanksgiving Day",
-    "2027-12-24": "Christmas Day (observed)",
-}
-NYSE_EARLY_CLOSE = {  # 1:00 p.m. ET
-    "2026-11-27": "day after Thanksgiving",
-    "2026-12-24": "Christmas Eve",
-    "2027-11-26": "day after Thanksgiving",
-}
-CALENDAR_YEARS = (2026, 2027)
-OPEN = datetime.time(9, 30)
-CLOSE = datetime.time(16, 0)
-EARLY = datetime.time(13, 0)
+CIRCUIT_NOTE = ("A stock at or near its daily price band cannot run: those are skipped. "
+                "A band left blank in the universe file cannot be judged.")
 
 SETUPS = [
+    ("gap_up", "gapped up from the previous close"),
+    ("gap_down", "gapped down from the previous close"),
     ("breakout_20d", "20-day closing-high breakout"),
     ("bull_flag", "bull flag"),
     ("reclaim_ma20", "reclaimed the 20-day average"),
@@ -141,38 +85,22 @@ class ScanError(Exception):
 
 # ---------------------------------------------------------------- time
 
-def _nth_sunday(year, month, n):
-    d = datetime.date(year, month, 1)
-    d += datetime.timedelta(days=(6 - d.weekday()) % 7)
-    return d + datetime.timedelta(weeks=n - 1)
+# IST is a fixed +05:30 with no daylight saving.
+CALENDAR_YEARS = mkt.CALENDAR_YEARS
+OPEN = mkt.SESSION_OPEN
+CLOSE = mkt.SESSION_CLOSE
 
 
-def eastern_offset(utc):
-    """Hours from UTC for New York: -4 in daylight time, -5 otherwise.
-    DST runs from 2:00 a.m. on the second Sunday of March to 2:00 a.m. on the
-    first Sunday of November (US rule since 2007)."""
-    y = utc.year
-    start = datetime.datetime.combine(_nth_sunday(y, 3, 2), datetime.time(7, 0))   # 2:00 EST
-    end = datetime.datetime.combine(_nth_sunday(y, 11, 1), datetime.time(6, 0))    # 2:00 EDT
-    naive = utc.replace(tzinfo=None)
-    return -4 if start <= naive < end else -5
+def to_ist(utc):
+    return mkt.to_ist(utc)
 
 
-def to_eastern(utc):
-    return utc.replace(tzinfo=None) + datetime.timedelta(hours=eastern_offset(utc))
+def ist_to_utc(local):
+    return mkt.ist_to_utc(local)
 
 
-def eastern_to_utc(local):
-    for off in (-4, -5):
-        utc = local - datetime.timedelta(hours=off)
-        if eastern_offset(utc) == off:
-            return utc
-    return local + datetime.timedelta(hours=5)
-
-
-def ts_to_eastern(ts):
-    """Unix seconds -> naive New York time. Never uses the machine's time zone."""
-    return to_eastern(datetime.datetime(1970, 1, 1) + datetime.timedelta(seconds=int(ts)))
+def ts_to_ist(ts):
+    return mkt.ts_to_ist(ts)
 
 
 def parse_now(text):
@@ -185,7 +113,7 @@ def parse_now(text):
     except ValueError:
         raise ScanError('--now wants a time like "2026-10-19 10:15" (New York) or ...Z (UTC)')
     if dt.tzinfo is None:
-        return eastern_to_utc(dt)
+        return ist_to_utc(dt)
     return (dt - dt.utcoffset()).replace(tzinfo=None)
 
 
@@ -197,25 +125,21 @@ def parse_hhmm(text, flag="--at"):
 
 
 def trading_day(d):
-    """(is_trading_day, reason). Weekends and the NYSE holiday list."""
-    if d.weekday() >= 5:
-        return False, "weekend"
-    name = NYSE_HOLIDAYS.get(d.isoformat())
-    if name:
-        return False, "NYSE holiday: " + name
-    return True, ""
+    """(is_trading_day, reason) from the shared NSE calendar."""
+    return mkt.trading_day(d)
 
 
 def session(d):
-    """(open_time, close_time) in New York time, or None if closed all day."""
-    ok, _ = trading_day(d)
-    if not ok:
-        return None
-    return OPEN, (EARLY if d.isoformat() in NYSE_EARLY_CLOSE else CLOSE)
+    """(open, close) in IST, or None when NSE is closed that day."""
+    return mkt.session(d)
 
 
 def clock_label(t):
-    """datetime or time -> '10:15 AM'."""
+    """datetime or time -> '10:15' (IST, 24-hour)."""
+    return "%02d:%02d" % (t.hour, t.minute)
+
+
+def _old_clock_label(t):
     h = t.hour % 12 or 12
     return "%d:%02d %s" % (h, t.minute, "AM" if t.hour < 12 else "PM")
 
@@ -397,87 +321,43 @@ def load_offline(path):
 
 # ---------------------------------------------------------------- universe
 
-TICKER = re.compile(r"^[A-Z]{1,5}$|^[A-Z]{1,4}\.[A-Z]$")
-ALWAYS_OUT = [
-    ("warrant", re.compile(r"\bwarrants?\b")),
-    ("unit or right", re.compile(r"\b(units?|rights?),? (each|that|entitling)\b|(?<!the )\brights? to\b")),
-    ("note", re.compile(r"\b(notes?|etns?|debentures?)\b")),
-    ("coupon", re.compile(r"%")),
-    ("depositary", re.compile(r"(?<!american )(?<!global )\bdepositary shares?\b")),
-]
-COMMON = re.compile(
-    r"\bcommon (stock|shares?|units?)\b|\bord(inary)? shares?\b|\bshares? of beneficial interest\b"
-    r"|\b(american|global) deposit[ao]ry\b|\bads[s]?\b|\badrs?\b"
-    r"|\b(limited partnership|partnership|trust) units?\b|\bl\.?p\.? units?\b"
-    r"|\bunits? (of|representing)\b.*\b(limited partner|partnership|beneficial interest|limited liability)")
-SOFT_OUT = [
-    ("unit", re.compile(r"\bunits?\b")),
-    ("right", re.compile(r"\brights?\b")),
-    ("bond", re.compile(r"\bbonds?\b")),
-    ("preferred", re.compile(r"\bpreferred\b|\bpreference\b")),
-]
+# An NSE trading symbol: letters and digits, with & and - (M&M, BAJAJ-AUTO).
+TICKER = re.compile(r"^[A-Z0-9][A-Z0-9&\-]{0,19}$")
+
+# The US version had to filter ETFs, units, warrants, rights and test issues
+# out of a raw symbol directory. The India universe is a curated data file, so
+# what belongs in it is decided when you edit that file, not by name regexes.
 
 
-def classify(row):
-    """One symbol-directory row -> 'keep' or the rule that drops it."""
-    sym = (row.get("Symbol") or row.get("ACT Symbol") or "").strip()
-    if (row.get("Test Issue") or "").strip() != "N":
-        return "test issue"
-    if (row.get("ETF") or "").strip() != "N":
-        return "ETF"
-    if (row.get("NextShares") or "N").strip() != "N":
-        return "NextShares"
-    if not TICKER.match(sym):
-        return "not a plain ticker"
-    if re.search(r"\.[UWR]$", sym):
-        return "unit / warrant / right suffix"
-    name = " ".join((row.get("Security Name") or "").lower().split())
-    for tag, rx in ALWAYS_OUT:
-        if rx.search(name):
-            return tag
-    if COMMON.search(name):
-        return "keep"
-    for tag, rx in SOFT_OUT:
-        if rx.search(name):
-            return tag
-    return "keep"
+def build_universe(index=None, sector=None, path=None):
+    """(kept [(SYM, name)], counts, source) from config/data/nse_universe.csv.
 
-
-def parse_symdir(text):
-    """Nasdaq Trader pipe file -> (rows, file_created). The last line is 'File Creation Time: ...'."""
-    lines = [ln for ln in text.replace("\r", "").split("\n") if ln.strip()]
-    if not lines or "|" not in lines[0]:
-        raise ScanError("not a Nasdaq Trader symbol directory")
-    hdr = [h.strip() for h in lines[0].split("|")]
-    if "Security Name" not in hdr or not ({"Symbol", "ACT Symbol"} & set(hdr)):
-        raise ScanError("not a Nasdaq Trader symbol directory (header %s)" % lines[0][:60])
-    rows, created = [], None
-    for ln in lines[1:]:
-        if ln.startswith("File Creation Time"):
-            m = re.search(r"(\d{2})(\d{2})(\d{4})(\d{2}):(\d{2})", ln)
-            if m:
-                created = "%s-%s-%s %s:%s" % (m.group(3), m.group(1), m.group(2), m.group(4), m.group(5))
+    The US version downloaded Nasdaq Trader's two pipe-delimited directories
+    and filtered out ETFs, units, warrants and test issues. NSE publishes no
+    equivalent single free file, so the universe is a data file you maintain,
+    and filtering is by the index and sector columns you fill in.
+    """
+    rows = mkt.load_universe(path)
+    counts = {"rows": len(rows)}
+    kept = []
+    for r in rows:
+        if index:
+            key = str(index).lower().replace(" ", "").replace("-", "")
+            if key not in r["indices"]:
+                counts["not in " + key] = counts.get("not in " + key, 0) + 1
+                continue
+        if sector and r["sector"] != str(sector).lower():
+            counts["other sector"] = counts.get("other sector", 0) + 1
             continue
-        rows.append(dict(zip(hdr, ln.split("|"))))
-    return rows, created
+        counts["keep"] = counts.get("keep", 0) + 1
+        kept.append((r["symbol"], r["name"]))
+    return sorted(kept), counts, (path or mkt.UNIVERSE_FILE)
 
 
-def build_universe(texts):
-    """{filename: text} -> (kept [(SYM, name)], counts, created)."""
-    kept, counts, created = {}, {}, None
-    for fname in NASDAQ_FILES:
-        if fname not in texts:
-            raise ScanError("missing %s" % fname)
-        rows, c = parse_symdir(texts[fname])
-        created = created or c
-        counts["rows"] = counts.get("rows", 0) + len(rows)
-        for r in rows:
-            why = classify(r)
-            counts[why] = counts.get(why, 0) + 1
-            if why == "keep":
-                sym = (r.get("Symbol") or r.get("ACT Symbol")).strip()
-                kept[sym] = " ".join((r.get("Security Name") or "").split())
-    return sorted(kept.items()), counts, created
+def bands_by_symbol(path=None):
+    """{SYMBOL: band_pct} for the symbols whose band you have filled in."""
+    return dict((r["symbol"], r["band_pct"]) for r in mkt.load_universe(path)
+                if r["band_pct"])
 
 
 # ---------------------------------------------------------------- daily setups
@@ -498,7 +378,7 @@ def rsi(closes, n=14):
 def daily_closes(series, now_utc):
     """[(date, close)] of COMPLETE daily bars: null closes dropped, today's bar dropped
     until the session closes, anything dated after the clock dropped."""
-    now = to_eastern(now_utc)
+    now = to_ist(now_utc)
     today = now.date()
     s = session(today)
     today_done = s is None or now.time() >= s[1]
@@ -506,7 +386,7 @@ def daily_closes(series, now_utc):
     for ts, c in zip(series["t"], series["c"]):
         if c is None:
             continue
-        d = ts_to_eastern(ts).date()
+        d = ts_to_ist(ts).date()
         if d > today or (d == today and not today_done):
             continue
         out[d] = float(c)  # one bar a day: a late duplicate (the live tick) wins
@@ -539,10 +419,22 @@ def find_setups(closes):
                   "run_pct": run * 100, "range5_pct": rng5 * 100}
 
 
-def scan_daily(data, symbols, now_utc, min_price, min_volume):
+def gap_pct(series):
+    """Today's open against the previous close, in percent, or None."""
+    meta = series.get("meta") or {}
+    prev = meta.get("prev_close")
+    opens = series.get("o") or []
+    if not prev or not opens or opens[-1] is None:
+        return None
+    return 100.0 * (float(opens[-1]) / float(prev) - 1.0)
+
+
+def scan_daily(data, symbols, now_utc, min_price, min_volume, bands=None, gap=None):
     """Pure. data = {SYM: series}. Returns (hits, counts, last_date)."""
     hits, dates = [], {}
-    counts = {"requested": len(symbols), "fetched": 0, "illiquid": 0, "short": 0, "scanned": 0}
+    counts = {"requested": len(symbols), "fetched": 0, "illiquid": 0, "short": 0, "scanned": 0,
+              "at_circuit": 0, "band_unknown": 0}
+    bands = bands if bands is not None else bands_by_symbol()
     for sym in symbols:
         s = data.get(sym)
         if not s:
@@ -560,16 +452,30 @@ def scan_daily(data, symbols, now_utc, min_price, min_volume):
         if len(bars) < MIN_DAILY_BARS:
             counts["short"] += 1
             continue
+        skip, state = circuit_skip(sym, price, s, bands)
+        if skip:
+            counts["at_circuit"] += 1
+            continue
+        if state == "band_unknown":
+            counts["band_unknown"] += 1
         counts["scanned"] += 1
         d_last = bars[-1][0]
         dates[d_last] = dates.get(d_last, 0) + 1
         closes = [c for _, c in bars]
         tags, nums = find_setups(closes)
+        g = gap_pct(s)
+        if gap and g is not None:
+            if g >= float(gap):
+                tags = list(tags) + ["gap_up"]
+            elif g <= -float(gap):
+                tags = list(tags) + ["gap_down"]
         if tags:
             hits.append({"symbol": sym, "setups": tags, "price": round(closes[-1], 2),
                          "close_date": d_last.isoformat(), "rsi": round(nums["rsi"], 1),
-                         "volume": int(vol) if vol is not None else None})
-    hits.sort(key=lambda h: (-(h["price"] * (h["volume"] or 0)), h["symbol"]))  # most dollars traded first
+                         "volume": int(vol) if vol is not None else None,
+                         "gap_pct": round(g, 2) if g is not None else None,
+                         "band_pct": bands.get(sym), "circuit": state})
+    hits.sort(key=lambda h: (-(h["price"] * (h["volume"] or 0)), h["symbol"]))  # most traded first
     last_date = max(dates, key=lambda d: (dates[d], d)) if dates else None
     counts["hits"] = len(hits)
     return hits, counts, last_date
@@ -592,7 +498,7 @@ def session_bars(series, day, cutoff):
         c = series["c"][i]
         if c is None:
             continue
-        et = ts_to_eastern(ts)
+        et = ts_to_ist(ts)
         if et.date() != day or et.second or et.minute % BAR_MIN:
             continue  # another day, or the live tick off the grid
         if et.time() < OPEN or et.time() >= close_t:
@@ -646,7 +552,7 @@ def orb_hit(bars, n_range):
 
 def orb_window(now_utc, at, or_minutes, until, explicit_day=None):
     """-> (day, cutoff naive ET) or raise ScanError with the plain message."""
-    now = to_eastern(now_utc)
+    now = to_ist(now_utc)
     day = explicit_day or now.date()
     if or_minutes < BAR_MIN or or_minutes % BAR_MIN or or_minutes > 120:
         raise ScanError("--or-minutes wants a multiple of 5 from 5 to 120 (15 is the classic)")
@@ -683,15 +589,33 @@ def orb_window(now_utc, at, or_minutes, until, explicit_day=None):
     return day, cutoff
 
 
+def circuit_skip(sym, last_price, series, bands):
+    """(skip, state) for a symbol against its daily price band.
+
+    India-specific. A stock at or near its band cannot make the move a
+    breakout needs. A symbol with no band in the universe file cannot be
+    judged, and is reported as band-unknown rather than assumed clear.
+    """
+    band = bands.get(sym)
+    if not band:
+        return False, "band_unknown"
+    prev = (series.get("meta") or {}).get("prev_close")
+    if not prev:
+        return False, "no_prev_close"
+    state = mkt.circuit_state(last_price, prev, band)
+    return state != "clear", state
+
+
 def scan_orb(stage1, symbols, day, cutoff, or_minutes, min_price=0.0, min_volume=0, confirm=None,
-             max_confirm=None):
+             max_confirm=None, bands=None):
     """stage1 = {SYM: series} with closes (spark or v8). confirm(sym) -> series with highs/lows
     (None = use the stage-1 series). With confirm and max_confirm, only the max_confirm most
     traded candidates (price x volume so far) are confirmed; the rest are counted as unconfirmed.
     Returns (hits, counts, failed {sym: why})."""
     n_range = or_minutes // BAR_MIN
     counts = {"requested": len(symbols), "fetched": 0, "unusable": 0, "illiquid": 0, "scanned": 0,
-              "candidates": 0, "confirmed": 0, "unconfirmed": 0}
+              "candidates": 0, "confirmed": 0, "unconfirmed": 0, "at_circuit": 0, "band_unknown": 0}
+    bands = bands if bands is not None else bands_by_symbol()
     hits, failed, cands = [], {}, []
     for sym in symbols:
         s = stage1.get(sym)
@@ -706,6 +630,12 @@ def scan_orb(stage1, symbols, day, cutoff, or_minutes, min_price=0.0, min_volume
         if bars[-1]["c"] < min_price or vol < min_volume:
             counts["illiquid"] += 1
             continue
+        skip, state = circuit_skip(sym, bars[-1]["c"], s, bands)
+        if skip:
+            counts["at_circuit"] += 1
+            continue
+        if state == "band_unknown":
+            counts["band_unknown"] += 1
         counts["scanned"] += 1
         if orb_candidate(bars, n_range):
             cands.append((sym, bars, bars[-1]["c"] * vol))
@@ -744,8 +674,43 @@ def progress(a, msg):
         print(msg, file=sys.stderr)
 
 
+def series_from_canonical(series):
+    """A config.datasource series -> the plain lists the scans expect."""
+    bars = series.get("bars") or []
+    meta = dict(series.get("meta") or {})
+    return {"t": [b["t"] for b in bars], "c": [b["c"] for b in bars],
+            "o": [b["o"] for b in bars], "h": [b["h"] for b in bars],
+            "l": [b["l"] for b in bars], "v": [b.get("v") or 0 for b in bars],
+            "meta": meta}
+
+
+def fetch_series(symbols, interval, pause, adapter=None, data_dir=None, a=None, days=None):
+    """One request per symbol through the adapter. -> ({SYM: series}, {SYM: error}).
+
+    The US version used Yahoo's spark endpoint in batches of 20, which only
+    that one provider offers. Going one at a time through the adapter keeps
+    every provider interchangeable, which is the point of the adapter.
+    """
+    data, failed = {}, {}
+    try:
+        ad = adapter if hasattr(adapter, "bars") else ds.get_adapter(
+            adapter, **({"directory": data_dir} if (adapter or "") == "offline" else {}))
+    except ds.DataError as e:
+        return {}, dict((s, str(e)) for s in symbols)
+    for k, sym in enumerate(symbols):
+        if k and pause and getattr(ad, "name", "") != "offline":
+            SLEEP(pause)
+        try:
+            data[sym] = series_from_canonical(ad.bars(sym, interval, days=days))
+        except ds.DataError as e:
+            failed[sym] = str(e)
+        if a is not None and len(symbols) > 50 and (k + 1) % 100 == 0:
+            progress(a, "  %d of %d symbols" % (k + 1, len(symbols)))
+    return data, failed
+
+
 def fetch_spark(symbols, rng, interval, pause, a=None):
-    """Batches of 20. -> ({SYM: series}, {SYM: error})."""
+    """Kept for the tests that drive the old batch path directly."""
     data, failed = {}, {}
     batches = [symbols[i:i + SPARK_MAX] for i in range(0, len(symbols), SPARK_MAX)]
     for k, batch in enumerate(batches):
@@ -832,31 +797,19 @@ def write_json(path, doc):
 
 
 def money(x):
-    return "${:,.2f}".format(x)
+    """A price in rupees, Indian digit grouping."""
+    return mkt.format_inr_price(x)
 
 
 # ---------------------------------------------------------------- commands
 
 def cmd_universe(a):
     t0 = time.time()
-    texts = {}
-    for k, fname in enumerate(NASDAQ_FILES):
-        if a.offline:
-            p = os.path.join(a.offline, fname)
-            if not os.path.exists(p):
-                raise ScanError("no %s in %s" % (fname, a.offline))
-            with open(p, encoding="utf-8", errors="replace") as fh:
-                texts[fname] = fh.read()
-        else:
-            if k and a.pause:
-                SLEEP(a.pause)
-            try:
-                texts[fname] = http_get(NASDAQ_URL + fname, timeout=60)
-            except urllib.error.HTTPError as e:
-                raise ScanError("nasdaqtrader.com answered HTTP %d for %s" % (e.code, fname))
-            except (urllib.error.URLError, OSError) as e:
-                raise ScanError("could not reach nasdaqtrader.com: %s" % getattr(e, "reason", e))
-    kept, counts, created = build_universe(texts)
+    kept, counts, source = build_universe(getattr(a, "index", None), getattr(a, "sector", None))
+    if not kept:
+        raise ScanError("no symbols matched%s%s in %s"
+                        % (" index %s" % a.index if getattr(a, "index", None) else "",
+                           " sector %s" % a.sector if getattr(a, "sector", None) else "", source))
     if not a.no_write:
         d = os.path.dirname(a.out)
         if d:
@@ -865,54 +818,55 @@ def cmd_universe(a):
             for sym, name in kept:
                 fh.write("%s|%s\n" % (sym, name))
     dropped = {k: v for k, v in counts.items() if k not in ("keep", "rows")}
+    warn = mkt.universe_warning()
     if a.json:
-        print(json.dumps({"count": len(kept), "rows": counts.get("rows", 0), "files_created": created,
-                          "dropped": dropped, "out": None if a.no_write else a.out,
-                          "seconds": round(time.time() - t0, 1)}, indent=2))
-    else:
-        print("Nasdaq Trader symbol directories%s: %s rows." % (
-            (", files of %s ET" % created) if created else "", "{:,}".format(counts.get("rows", 0))))
-        print("Kept %s US-listed common stocks, ordinary shares and ADRs." % "{:,}".format(len(kept)))
-        print("Dropped: " + ", ".join("%s %s" % ("{:,}".format(v), k)
-                                      for k, v in sorted(dropped.items(), key=lambda kv: -kv[1])) + ".")
-        if not a.no_write:
-            print("Wrote %s (one SYMBOL|Name a line)." % a.out)
-    return 0 if kept else 1
+        print(json.dumps({"source": source, "kept": len(kept), "rows": counts.get("rows", 0),
+                          "dropped": dropped, "symbols": [k for k, _ in kept],
+                          "warning": warn, "seconds": round(time.time() - t0, 2)}, indent=2))
+        return 0
+    print("%s: %s rows, kept %s." % (source, counts.get("rows", 0), len(kept)))
+    for k in sorted(dropped):
+        print("  left out: %-22s %s" % (k, dropped[k]))
+    if not a.no_write:
+        print("Wrote %s." % a.out)
+    banded = bands_by_symbol()
+    print("Price bands known for %d of %d kept symbols; the rest cannot be circuit-checked."
+          % (sum(1 for k, _ in kept if k in banded), len(kept)))
+    if warn:
+        print("WARNING: " + warn)
+    return 0
 
 
 def cmd_daily(a):
     t0 = time.time()
     now = parse_now(a.now)
-    offline_syms = None
-    if a.offline:
-        data, failed = load_offline(a.offline)
-        offline_syms = sorted(set(data) | set(failed))
-    symbols = read_symbols(a, offline_syms)
-    if not a.offline:
-        progress(a, "Fetching daily closes for %s symbols (%d spark requests)..."
-                 % ("{:,}".format(len(symbols)), (len(symbols) + SPARK_MAX - 1) // SPARK_MAX))
-        data, failed = fetch_spark(symbols, "3mo", "1d", a.pause, a)
-    hits, counts, last_date = scan_daily(data, symbols, now, a.min_price, a.min_volume)
+    symbols = read_symbols(a, None)
+    progress(a, "Fetching daily closes for %s symbols..." % "{:,}".format(len(symbols)))
+    data, failed = fetch_series(symbols, "1d", a.pause, getattr(a, "adapter", None),
+                                getattr(a, "data", None), a)
+    hits, counts, last_date = scan_daily(data, symbols, now, a.min_price, a.min_volume,
+                                        gap=getattr(a, "gap", None))
     nfailed = len(symbols) - counts["fetched"]
     as_of = ("%s close" % last_date.isoformat()) if last_date else None
     doc = {"created_by": "trader-scanner", "created_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "mode": "daily",
            "as_of": as_of, "universe": len(symbols), "scanned": counts["scanned"], "failed": nfailed,
-           "source": "yahoo", "filters": {"min_price": a.min_price, "min_volume": a.min_volume},
+           "source": getattr(a, "adapter", None) or ds.DEFAULT_ADAPTER,
+           "filters": {"min_price": a.min_price, "min_volume": a.min_volume},
            "note": NOTE, "hits": hits}
-    if a.offline:
-        doc["offline"] = os.path.basename(a.offline.rstrip("/"))
+    if getattr(a, "adapter", None):
+        doc["adapter"] = a.adapter
     if not a.no_write:
         write_json(a.out, doc)
     if a.json:
         print(json.dumps(dict(doc, counts=counts, seconds=round(time.time() - t0, 1)), indent=2))
         return 0 if hits else 1
-    local = to_eastern(now)
-    print("Daily scan, %s ET, closes through %s (Yahoo spark, daily closes only)." % (
+    local = to_ist(now)
+    print("Daily scan, %s IST, closes through %s (daily closes only)." % (
         local.strftime("%a %Y-%m-%d %H:%M"), last_date.isoformat() if last_date else "nothing"))
-    print("Fetched %s of %s charts%s. %s passed the liquidity filter ($%s+ and %s+ shares)%s; "
+    print("Fetched %s of %s charts%s. %s passed the liquidity filter (%s+ and %s+ shares)%s; "
           "%s scanned." % ("{:,}".format(counts["fetched"]), "{:,}".format(len(symbols)),
                            (" (%s failed or had no data)" % "{:,}".format(nfailed)) if nfailed else "",
-                           "{:,}".format(counts["fetched"] - counts["illiquid"]), _n(a.min_price),
+                           "{:,}".format(counts["fetched"] - counts["illiquid"]), money(a.min_price),
                            "{:,}".format(a.min_volume),
                            (", %d had under %d days" % (counts["short"], MIN_DAILY_BARS)) if counts["short"] else "",
                            "{:,}".format(counts["scanned"])))
@@ -928,6 +882,10 @@ def cmd_daily(a):
                                               ", ".join(LABEL[t] for t in h["setups"])))
     if len(hits) > a.show:
         print("  ... and %d more in the watchlist (--show N for more)." % (len(hits) - a.show))
+    if counts.get("at_circuit") or counts.get("band_unknown"):
+        print("Circuits: %d skipped at or near a band, %d with no band in the universe "
+              "file, so not judged." % (counts.get("at_circuit", 0),
+                                        counts.get("band_unknown", 0)))
     if not a.no_write:
         print("Wrote %s (mode daily, %d hit%s)." % (a.out, len(hits), "" if len(hits) == 1 else "s"))
     print(NOTE + " Next: pick one chart, then /trader-news TICKER.")
@@ -945,58 +903,43 @@ def cmd_orb(a):
     at = parse_hhmm(a.at) if a.at else None
     cfg = read_config(a.config)
     until = parse_hhmm(a.until or cfg.get("no_entries_after") or "15:30", "--until")
-    data = failed = None
     explicit_day = None
-    offline_syms = None
-    if a.offline:
-        data, failed = load_offline(a.offline)
-        offline_syms = sorted(set(data) | set(failed))
-        if not a.now:
-            days = [ts_to_eastern(s["t"][-1]).date() for s in data.values() if s["t"]]
-            if days:
-                explicit_day = max(days)
-                if at is None:
-                    raise ScanError("offline replay: give --at HH:MM or --now \"YYYY-MM-DD HH:MM\"")
+    symbols = read_symbols(a, None)
+    progress(a, "Fetching 5-minute bars for %s symbols..." % "{:,}".format(len(symbols)))
+    data, failed = fetch_series(symbols, "%dm" % BAR_MIN, a.pause, getattr(a, "adapter", None),
+                                getattr(a, "data", None), a)
+    if not a.now:
+        days = [ts_to_ist(ser["t"][-1]).date() for ser in data.values() if ser["t"]]
+        if days and getattr(a, "adapter", None) == "offline":
+            explicit_day = max(days)
+            if at is None:
+                raise ScanError("offline replay: give --at HH:MM or --now \"YYYY-MM-DD HH:MM\"")
     day, cutoff = orb_window(now, at, a.or_minutes, until, explicit_day)
-    symbols = read_symbols(a, offline_syms)
+    # the adapter already returned whole sessions, so there is no second
+    # confirmation pass: the US version needed one because spark carries no
+    # highs or lows
     confirm = None
-    if not a.offline:
-        today = to_eastern(parse_now(None)).date()
-        if (today - day).days > 6:
-            raise ScanError("Yahoo's free 5-minute history is short: replay %s with --offline" % day.isoformat())
-        rng = "1d" if day == today else "5d"
-        progress(a, "Stage 1: 5-minute closes for %s symbols (%d spark requests)..."
-                 % ("{:,}".format(len(symbols)), (len(symbols) + SPARK_MAX - 1) // SPARK_MAX))
-        data, failed = fetch_spark(symbols, rng, "%dm" % BAR_MIN, a.pause, a)
-        done = []
-
-        def confirm(sym):
-            if a.pause:
-                SLEEP(a.pause)
-            done.append(sym)
-            if len(done) % 50 == 0:
-                progress(a, "  stage 2: %d v8 charts so far" % len(done))
-            return parse_chart(yahoo_get(chart_path(sym, rng, "%dm" % BAR_MIN)), sym)
-    hits, counts, failed2 = scan_orb(data, symbols, day, cutoff, a.or_minutes, a.min_price, a.min_volume, confirm,
-                                     a.max_confirm)
+    hits, counts, failed2 = scan_orb(data, symbols, day, cutoff, a.or_minutes, a.min_price,
+                                     a.min_volume, confirm, a.max_confirm)
     failed = dict(failed or {})
     failed.update(failed2)
     nfailed = len([s for s in symbols if s in failed])
-    as_of = "%s %s ET" % (day.isoformat(), cutoff.strftime("%H:%M"))
+    as_of = "%s %s IST" % (day.isoformat(), cutoff.strftime("%H:%M"))
     doc = {"created_by": "trader-scanner", "created_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "mode": "orb",
            "as_of": as_of, "universe": len(symbols), "scanned": counts["scanned"], "failed": nfailed,
-           "unconfirmed": counts["unconfirmed"], "source": "yahoo", "or_minutes": a.or_minutes,
+           "unconfirmed": counts["unconfirmed"], "source": getattr(a, "adapter", None) or ds.DEFAULT_ADAPTER, "or_minutes": a.or_minutes,
            "interval": "%dm" % BAR_MIN,
            "filters": {"min_price": a.min_price, "min_volume": a.min_volume}, "note": NOTE, "hits": hits}
-    if a.offline:
-        doc["offline"] = os.path.basename(a.offline.rstrip("/"))
+    if getattr(a, "adapter", None):
+        doc["adapter"] = a.adapter
     if not a.no_write:
         write_json(a.out, doc)
     if a.json:
         print(json.dumps(dict(doc, counts=counts, seconds=round(time.time() - t0, 1)), indent=2))
         return 0 if hits else 1
-    print("Opening-range breakout scan, %s %s ET: %d-minute range (9:30 to %s), 5-minute bars, Yahoo."
-          % (day_label(day), clock_label(cutoff), a.or_minutes, clock_label(slot(day, a.or_minutes // BAR_MIN))))
+    print("Opening-range breakout scan, %s %s IST: %d-minute range (%s to %s), 5-minute bars."
+          % (day_label(day), clock_label(cutoff), a.or_minutes,
+             mkt.SESSION_OPEN.strftime("%H:%M"), clock_label(slot(day, a.or_minutes // BAR_MIN))))
     print("Fetched %s of %s charts%s; %s usable%s; %s candidates, %s confirmed with real highs and lows."
           % ("{:,}".format(counts["fetched"]), "{:,}".format(len(symbols)),
              (" (%s failed or had no data)" % "{:,}".format(nfailed)) if nfailed else "",
@@ -1017,6 +960,10 @@ def cmd_orb(a):
             print("  ... and %d more in the watchlist (--show N for more)." % (len(hits) - a.show))
     else:
         print("No chart closed above its opening-range high by %s." % clock_label(cutoff))
+    if counts.get("at_circuit") or counts.get("band_unknown"):
+        print("Circuits: %d skipped at or near a band, %d with no band in the universe "
+              "file, so not judged." % (counts.get("at_circuit", 0),
+                                        counts.get("band_unknown", 0)))
     if not a.no_write:
         print("Wrote %s (mode orb, %d hit%s)." % (a.out, len(hits), "" if len(hits) == 1 else "s"))
     print(NOTE + " Next: pick one chart, then /trader-news TICKER and /trader-entry TICKER.")
@@ -1031,9 +978,11 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="Chart Scanner (trader-scanner): daily setups and opening-range breakouts.")
     sub = ap.add_subparsers(dest="cmd")
 
-    p = sub.add_parser("universe", help="download Nasdaq Trader's lists -> trader/universe.txt")
+    p = sub.add_parser("universe", help="build trader/universe.txt from config/data/nse_universe.csv")
     p.add_argument("--out", default=DEFAULT_UNIVERSE)
-    p.add_argument("--offline", metavar="DIR", help="a folder with nasdaqlisted.txt and otherlisted.txt")
+    p.add_argument("--index", choices=list(mkt.KNOWN_INDICES),
+                   help="keep only this index's members (nifty50, nifty500, fno)")
+    p.add_argument("--sector", help="keep only this sector, as spelled in the universe file")
     p.add_argument("--no-write", action="store_true")
     p.add_argument("--pause", type=float, default=PAUSE)
     p.add_argument("--json", action="store_true")
@@ -1046,7 +995,8 @@ def main(argv=None):
         p.add_argument("--limit", type=int, help="scan only the first N symbols")
         p.add_argument("--min-price", type=float, default=min_price)
         p.add_argument("--min-volume", type=int, default=min_volume)
-        p.add_argument("--offline", metavar="PATH", help="fixture folder or file instead of the network")
+        p.add_argument("--adapter", help="data adapter: yahoo (default), offline, kite, upstox, angel, dhan")
+        p.add_argument("--data", metavar="DIR", help="folder of saved payloads, with --adapter offline")
         p.add_argument("--now", help='pretend it is this time ("2026-10-19 10:15" New York, or ...Z)')
         p.add_argument("--out", default="trader/watchlist.json")
         p.add_argument("--no-write", action="store_true")
@@ -1055,14 +1005,16 @@ def main(argv=None):
         p.add_argument("--quiet", action="store_true")
         p.add_argument("--json", action="store_true")
 
-    p = sub.add_parser("daily", help="pre-market setups from daily closes")
-    common(p, 5.0, 1000000)
+    p = sub.add_parser("daily", help="pre-open setups from daily closes")
+    common(p, 50.0, 100000)
+    p.add_argument("--gap", type=float, metavar="PCT",
+                   help="also flag a gap up or down of at least PCT from the previous close")
     p = sub.add_parser("orb", help="opening-range breakouts so far today")
-    common(p, 5.0, 0)
+    common(p, 50.0, 0)
     p.add_argument("--or-minutes", type=int, default=15)
     p.add_argument("--max-confirm", type=int, default=MAX_CONFIRM,
-                   help="v8 charts to fetch in stage 2, most traded first (%d; 0 = all)" % MAX_CONFIRM)
-    p.add_argument("--at", help="cut the clock at this New York time, HH:MM")
+                   help="candidates to keep, most traded first (%d; 0 = all)" % MAX_CONFIRM)
+    p.add_argument("--at", help="cut the clock at this IST time, HH:MM")
     p.add_argument("--until", help="no new entries after HH:MM (default: config no_entries_after, 15:30)")
     p.add_argument("--config", default="trader/config.json")
     a = ap.parse_args(argv)
