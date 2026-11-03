@@ -1,0 +1,28 @@
+# NSE equity trading holidays. One row per full-day closure.
+#
+# VERIFY: this whole file. Replace it with NSE's official annual holiday
+# circular before trading. Source:
+#   https://www.nseindia.com/resources/exchange-communication-holidays
+#   (Trading Holidays, Capital Market segment)
+#
+# confidence=fixed   national holiday on a fixed Gregorian date, high confidence
+# confidence=estimate  lunar/religious date, computed per year by NSE. These
+#                      ARE NOT RELIABLE and must be replaced from the circular.
+#
+# Weekends are handled in code and are not listed here.
+date,name,confidence
+2026-01-26,Republic Day,fixed
+2026-03-04,Holi,estimate
+2026-03-21,Id-ul-Fitr (Ramzan Id),estimate
+2026-03-31,Mahavir Jayanti,estimate
+2026-04-03,Good Friday,fixed
+2026-04-14,Dr Baba Saheb Ambedkar Jayanti,fixed
+2026-05-01,Maharashtra Day,fixed
+2026-05-27,Bakri Id,estimate
+2026-08-15,Independence Day,fixed
+2026-09-14,Ganesh Chaturthi,estimate
+2026-10-02,Mahatma Gandhi Jayanti,fixed
+2026-10-20,Dussehra,estimate
+2026-11-09,Diwali Balipratipada,estimate
+2026-11-24,Guru Nanak Jayanti,estimate
+2026-12-25,Christmas,fixed

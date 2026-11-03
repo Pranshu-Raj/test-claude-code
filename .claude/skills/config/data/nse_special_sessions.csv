@@ -1,0 +1,10 @@
+# Sessions that do not follow the normal 09:15-15:30 timetable.
+#
+# kind=muhurat   the ceremonial Diwali session, roughly one hour in the
+#                evening. NSE announces the exact window by circular each year.
+#
+# VERIFY: every row. Source: NSE circulars (Muhurat Trading).
+# Unlike the NYSE 1:00 p.m. early close this replaces, an Indian special
+# session is usually an EXTRA window on a day that is otherwise closed.
+date,name,kind,open,close
+2026-11-08,Muhurat Trading (Diwali Laxmi Pujan),muhurat,18:15,19:15
