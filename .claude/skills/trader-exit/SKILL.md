@@ -1,17 +1,22 @@
 ---
 name: trader-exit
 description: >-
-  Exit Planner. Sets your stop and your target before you enter, so you know
-  when to get out. Reads the entry from trader-entry (or a price you give),
-  puts the stop at the opening-range midpoint by default (or the range low,
-  your price, a percent, or a multiple of the ATR), rounds it down to the
-  cent, and sets the target at 2R (or 1R, or your price). Refuses a stop at or
-  above the entry, a target at or below it, or a stop too tight to survive the
-  spread, and says why. Writes trader/plan.json for the Time Machine, the
-  Budget Manager and Price Alerts. Long side only. Use when the user says
-  "where's my stop", "set my stop and target", "plan the exit", "when do I get
-  out", "stop loss", "what's my R", "risk reward", or right after
-  /trader-entry triggers, before /trader-timemachine.
+  Exit Planner for Indian cash equity intraday. Sets your stop and your target
+  before you enter, so you know when to get out. Reads the entry from
+  trader-entry (or a price you give), puts the stop at the opening-range
+  midpoint by default (or the range low, your price, a percent, or a multiple
+  of the ATR), rounds it DOWN to a tradable NSE tick, and sets the target at
+  2R (or 1R, or your price) rounded up to a tick. Forces the flat-by time
+  before your broker's intraday square-off, because a broker square-off is not
+  an exit plan. Reports the reward:risk net of Indian charges (STT on the sell
+  leg, stamp duty on the buy leg, GST on brokerage), which can turn a 2R plan
+  into 1.67R. Refuses a stop at or above the entry, a target at or below it, a
+  stop inside one tick or too tight to survive the spread, and says why.
+  Writes trader/plan.json for the Time Machine, the Budget Manager and Price
+  Alerts. Long side only. Use when the user says "where's my stop", "set my
+  stop and target", "plan the exit", "when do I get out", "stop loss", "what's
+  my R", "risk reward", "square off", or right after /trader-entry triggers,
+  before /trader-timemachine.
 argument-hint: "[--stop or-mid|or-low|price:X|pct:X|atr:K] [--target 2R|1R|price:X]"
 ---
 
@@ -24,28 +29,31 @@ anything in the middle of a fast move. A stop is a plan, not a guarantee: a
 gap or a fast market can fill past it. Day trading loses most people money,
 and a neat plan does not change that.
 
+Every number here is computed by `exit.py`, not by the model reading this.
+
 `${CLAUDE_SKILL_DIR}` below is this skill's folder (where this SKILL.md lives).
 
 ```bash
 python3 "${CLAUDE_SKILL_DIR}/exit.py" plan                          # trader/entry.json: midpoint stop, 2R target
 python3 "${CLAUDE_SKILL_DIR}/exit.py" plan --stop or-mid --target 1R --write
-python3 "${CLAUDE_SKILL_DIR}/exit.py" plan --stop atr:1.5           # needs the session's bars (Yahoo or --offline)
-python3 "${CLAUDE_SKILL_DIR}/exit.py" plan --symbol TSLA --entry 364.18 --or-high 362.18 --or-low 354.47
+python3 "${CLAUDE_SKILL_DIR}/exit.py" plan --stop atr:1.5           # needs the session's bars
+python3 "${CLAUDE_SKILL_DIR}/exit.py" plan --symbol TCS --entry 4026.50 --or-high 4020 --or-low 3996
 python3 "${CLAUDE_SKILL_DIR}/exit.py" show                          # the current trader/plan.json
 ```
 
-Other flags: `--flat-by 15:55`, `--json`, `--now "2026-10-19 10:15"` (New
-York time), `--entry PRICE` with a waiting entry.json to plan ahead, `--setup
-level`, `--offline FILE` (a saved Yahoo chart JSON for an ATR stop).
+Other flags: `--flat-by 15:10`, `--json`, `--now "2026-11-02 10:15"` (IST),
+`--entry PRICE` with a waiting entry.json to plan ahead, `--setup level`,
+`--adapter offline --data DIR` for saved bars, `--date YYYY-MM-DD`.
 
 ## What it reads and writes
 
 | file | what |
 | --- | --- |
 | `trader/entry.json` | the trigger from trader-entry: symbol, entry price, time, bar, opening range |
-| `trader/config.json` | `flat_by` (15:55) and `min_reward_risk` (1.0: a note here, trader-risk enforces it) |
-| Yahoo chart API | only for an `atr:K` stop: the session's bars up to the entry bar, free and unofficial |
-| `trader/plan.json` | with `--write`: entry, stop and its rule, target and its R, risk a share, reward:risk, flat by. trader-timemachine, trader-budget and trader-alerts read it |
+| `trader/config.json` | `flat_by` (15:15 IST), `min_reward_risk` (1.0: a note here, trader-risk enforces it), `max_loss_per_trade_inr` (enables the net-of-cost figures), `exchange`, `product` |
+| `config/india_market.py` | session hours, the NSE tick, the broker square-off time, the holiday calendar |
+| a data adapter | only for an `atr:K` stop: the session's bars up to the entry bar |
+| `trader/plan.json` | with `--write`: entry, stop and its rule, target and its R, risk a share, reward:risk, flat by, square-off, the cost estimate. trader-timemachine, trader-budget and trader-alerts read it |
 
 ## Stops and targets
 
@@ -59,66 +67,56 @@ level`, `--offline FILE` (a saved Yahoo chart JSON for an ATR stop).
 
 A level setup has no opening range to lean on, so it needs a stop you name.
 
-- **Rounding.** The stop rounds AWAY from the entry to the cent (down, for a
-  long). Risk = entry minus stop. Target = entry + R x risk, rounded half up
-  to the cent. `2R` by default; `1R`, `1.5R` or `price:X` also work.
+- **Rounding is to the NSE tick, not the paisa.** Most scrips tick at 0.05,
+  so a stop of 4008.03 is not a price you can send. The stop rounds AWAY from
+  the entry (down, for a long) to a tradable tick, and the target rounds up,
+  so rounding never quietly tightens your stop or shrinks your target. The
+  tick comes from `config/india_market.py`, where it is set per price band.
+- **Risk and reward.** Risk = entry minus stop. Target = entry + R x risk.
+  `2R` by default; `1R`, `1.5R` or `price:X` also work. A worked example: TCS
+  with the opening range 3996.00 to 4020.00 and an entry at 4026.50 gives a
+  midpoint stop of 4008.00, so 18.50 a share at risk, a 1R target of 4045.00
+  and a 2R target of 4063.50.
 - **Refused, with the reason.** A stop at or above the entry. A target at or
-  below it. A risk under 0.05% of the price: too tight to survive the
-  spread, normal wiggle would stop you out. An entry.json that has not
-  triggered (unless you give `--entry`). A short: v2 plans longs only.
-- **Flat by.** 15:55 by default (or `flat_by` in the config). Out by then,
-  win or lose, no overnight hold. On a 1:00 p.m. early close it moves up to
-  12:55. An entry at or after the flat-by time is refused.
+  below it. A stop inside one tick of the entry. A risk under 0.05% of the
+  price: too tight to survive the spread, normal wiggle would stop you out.
+  An entry.json that has not triggered (unless you give `--entry`). A short:
+  intraday shorts are legal in Indian cash equity but this plans longs only.
+
+## Square-off, which has no US equivalent
+
+Your broker closes open MIS positions itself, around 15:15 to 15:25, at
+whatever price is there. That is not an exit you chose, so:
+
+- `flat_by` defaults to 15:15 IST, before `BROKER_SQUARE_OFF` (15:20).
+- A `--flat-by` at or after the square-off is refused outright.
+- A `flat_by` in your config at or after it is pulled back, with a note.
+- An entry at or after the flat-by time is refused: there is no time to hold it.
+- Check your own broker's square-off time and set it in the config. They differ.
+
+## Costs change the plan
+
+Indian intraday charges are not symmetric: STT falls on the sell leg, stamp
+duty on the buy leg, and GST applies to brokerage plus exchange and SEBI
+charges. Against a tight stop they are not noise. With
+`max_loss_per_trade_inr` in your config this skill reports the indicative
+reward:risk net of charges at the size that max loss implies, plus the
+breakeven price. A plan showing 2R gross can be 1.67R net. trader-budget
+computes the authoritative figure at the real size, and trader-risk checks
+the net loss against your limit.
+
+Intraday equity gains in India are speculative business income, taxed at your
+slab rate, not capital gains. That is a note in the output, not tax advice.
 
 ## Steps
 
 1. Run it right after `/trader-entry` triggers. Before that, `--entry PRICE`
-   plans ahead at the level you expect.
-2. Use the default stop for an opening-range breakout unless the user names
-   another. A level setup needs one: ask.
-3. Run `exit.py plan --write`. Read back the entry, the stop and its rule,
-   the target and its rule, the risk a share, reward:risk and flat by.
-4. If it refuses, say the reason and the fix (a wider stop, a farther
-   target). Never loosen anything on your own.
-5. Say once that the stop is a plan, not a guarantee.
-6. Hand off to `/trader-timemachine` to replay the plan, then `/trader-budget`
-   to size it to the max loss per trade. Offer `/trader-alerts` for the stop,
-   the target and the flat-by time. Claude can keep `entry.py watch` running
-   in the background or on a `/loop` until a setup triggers, then come here.
-
-## Example: the reel
-
-TSLA, Monday 2026-10-19. The entry is 364.18 at 10:15 AM (the 10:10 bar,
-bar 8) and the opening range is 354.47 to 362.18. `exit.py plan --stop
-or-mid --target 1R --write`:
-
-```
-Exit plan: TSLA long, Mon 2026-10-19, opening-range breakout on 5-minute bars
-  Entry         $364.18 at 10:15 AM (bar 8)
-  Stop          $358.32  opening-range midpoint: ($362.18 + $354.47) / 2 = $358.325, rounded down
-  Target        $370.04  1R (one times the risk)
-  Risk a share  $5.86 (1.61% of the entry)
-  Reward:risk   1.0
-  Flat by       15:55 ET, win or lose: no overnight hold
-```
-
-The default 2R target would be 364.18 + 2 x 5.86 = 375.90. trader-budget then
-sizes it: a $50 max loss per trade buys floor(50 / 5.86) = 8 shares.
-
-## Rules
-
-- The stop and the target are set before the entry, never after.
-- Never move a stop further from the entry once the trade is on.
-- Plain numbers only: entry, stop, target, risk a share, reward:risk. It
-  never prints a P&L or a return.
-- Nothing here promises winning trades or money. A 1R target is not a
-  prediction that the price gets there.
-- Long side only. v2 plans longs only.
-
-## What it never does
-
-It never places an order, never sizes a position, never widens a stop to
-make a plan pass, and never calls a stop a guarantee.
+   plans ahead off a waiting entry.
+2. Read the refusal if there is one. It names the rule and the number.
+3. `--write` hands `trader/plan.json` to `/trader-timemachine`, then
+   `/trader-budget` sizes it, then `/trader-risk` checks it.
+4. Never widen a stop after the entry. Moving it further away is how a small
+   loss becomes a large one.
 
 ## Safety
 

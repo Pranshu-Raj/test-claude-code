@@ -236,6 +236,15 @@ def format_inr(x, paise=True):
     return ("-" if neg else "") + RUPEE + body
 
 
+def format_inr_price(x):
+    """A price always carries its paise: 4,008.00, never 4,008."""
+    neg = float(x) < 0
+    v = abs(float(x))
+    whole = int(v)
+    return ("-" if neg else "") + RUPEE + "%s.%02d" % (group_indian(whole),
+                                                       int(round((v - whole) * 100)))
+
+
 def format_inr_words(x):
     """Report-friendly scale: 'Rs 12.35 lakh', 'Rs 1.23 crore'."""
     v = float(x)
