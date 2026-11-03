@@ -1,42 +1,39 @@
 #!/usr/bin/env python3
-"""Earnings reader for trader-analyst. Standard library only.
+"""Earnings and Flows Analyst for trader-analyst: what changed in the numbers,
+and where the money is going. Indian equities, INR crore. Standard library
+only. It never places an order.
 
-Pulls a company's reported numbers from SEC's XBRL "company facts" API and
-lays out what changed, quarter by quarter: revenue, gross, operating and net
-margins, net income, diluted EPS, and growth against the same quarter a year
-earlier. It also finds the latest earnings press release (the EX-99 exhibit
-of the newest 8-K with item 2.02) and the latest 10-Q or 10-K.
+    python3 facts.py results RELIANCE --from DIR      # quarter by quarter
+    python3 facts.py results RELIANCE --paste FILE    # a results table you paste in
+    python3 facts.py flows                            # FII and DII net, India VIX, sectors
+    python3 facts.py flows --from DIR --now "2026-11-02 10:00"
 
-    python3 facts.py AAPL
-    python3 facts.py AAPL KO --quarters 8
-    python3 facts.py AAPL --json
-    python3 facts.py AAPL AXP GOOGL KO BAC --metrics trader/metrics.json
+TWO HALVES, as agreed when this was ported.
 
-Sources (SEC; a User-Agent with your name and email is required, from
---user-agent, SEC_USER_AGENT or sec_user_agent in trader/config.json):
-  https://www.sec.gov/files/company_tickers.json            ticker -> CIK
-  https://data.sec.gov/api/xbrl/companyfacts/CIK##########.json
-  https://data.sec.gov/submissions/CIK##########.json        filings list
-  https://www.sec.gov/Archives/edgar/data/<cik>/<accession>/index.json
+FUNDAMENTALS. The arithmetic is the US pack's, unchanged and still tested:
+quarterly revenue, gross, operating and net margins, net income and diluted
+EPS, each against the same quarter a year earlier, plus the trailing twelve
+months. What changed is where the numbers come from. The US version read
+SEC's XBRL company-facts API, keyed by CIK, in us-gaap tags. India has no
+equivalent free structured API: companies file results with the exchanges as
+PDFs and XBRL of varying quality. So this reads a results table in a simple
+shape you can save or paste, in rupee crore, and converts it internally to
+the same structure the arithmetic already understood.
 
-How the quarters are built:
-  - A quarter is a reported value covering about three months (80 to 100
-    days). When a period was reported more than once (a later filing repeats
-    it as a comparison), the latest filing wins, so restatements are used.
-  - Companies do not file a fourth-quarter 10-Q. The fourth quarter is the
-    full year (10-K) minus the three quarters inside it, and it is marked
-    "derived". Derived EPS is approximate: share counts change during a year.
-  - Revenue is read from the first concept a company uses of:
-    RevenueFromContractWithCustomerExcludingAssessedTax, Revenues,
-    RevenuesNetOfInterestExpense, SalesRevenueNet and a few more. Banks and
-    insurers report revenue differently; margins for them can be blank.
+FLOWS, which the US pack has no concept of and which matter more to an Indian
+intraday trader than a quarterly margin: net FII and DII cash-market activity,
+India VIX, and which sector indices are leading or lagging. A heavy FII sell
+day with VIX rising is a different market from a quiet one, whatever a chart
+says.
 
---metrics FILE merges one row per ticker into a JSON file (for notes or a sheet)
-(TTM revenue and EPS, margins, growth). Offline: --offline DIR reads
-company_tickers.json, companyfacts-CIK##########.json,
-submissions-CIK##########.json and <accession>/index.json from DIR.
+Everything is in rupees, shown in lakh and crore.
 
-Numbers only: this tool never says whether a stock is a buy.
+UNVERIFIED: the flows and results endpoints follow NSE's published JSON, but
+this port was written where those hosts are unreachable, so no live call has
+been made. Saved and pasted inputs are the tested path.
+
+Not investment advice, and a quarterly number is not a day-trading signal.
+Day trading loses most people money.
 """
 
 import argparse
@@ -50,26 +47,55 @@ import time
 import urllib.error
 import urllib.request
 
-TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
-FACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK%s.json"
-SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK%s.json"
-ARCHIVE_URL = "https://www.sec.gov/Archives/edgar/data/%d/%s/"
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
+from config import india_market as mkt
+
+# VERIFY each: NSE changes these paths, and all of them need a browser user
+# agent plus a primed cookie. Source: NSE's own pages for each dataset.
+NSE_HOME = "https://www.nseindia.com"
+NSE_FII_DII = "https://www.nseindia.com/api/fiidiiTradeReact"
+NSE_VIX = "https://www.nseindia.com/api/allIndices"
+NSE_RESULTS = "https://www.nseindia.com/api/corporates-financial-results?index=equities&symbol=%s"
+BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/120.0 Safari/537.36")
 PLACEHOLDER = "you@example.com"
+
+# Indian results are reported in rupee crore almost universally.
+CRORE = 10000000
+
+# The sector indices worth watching for rotation. VERIFY the symbol map in
+# config/india_market.py BENCHMARKS.
+SECTOR_INDICES = ("NIFTY BANK", "NIFTY IT", "NIFTY FMCG", "NIFTY AUTO",
+                  "NIFTY PHARMA", "NIFTY METAL")
+
+# Which filing labels count as a reporting period. The US version hardcoded
+# SEC form types; an Indian results table carries no form, so "results" is
+# the label this skill's own adapter writes. The SEC ones stay so saved US
+# data still parses.
+DURATION_FORMS = ("results", "quarterly", "10-Q", "10-K", "20-F", "40-F")
 UA_HELP = ("SEC requires a User-Agent with your name and email. Set \"sec_user_agent\": "
            "\"Your Name you@example.com\" in trader/config.json (your real name and email), "
            "or export SEC_USER_AGENT, or pass --user-agent.")
 
+# The US version keyed these to us-gaap XBRL tags. An Indian results table
+# uses plain line names, and filings differ, so each metric accepts several.
 CONCEPTS = {
-    "revenue": ["RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues",
-                "RevenuesNetOfInterestExpense", "RevenueFromContractWithCustomerIncludingAssessedTax",
-                "SalesRevenueNet", "SalesRevenueGoodsNet", "SalesRevenueServicesNet"],
-    "cost_of_revenue": ["CostOfGoodsAndServicesSold", "CostOfRevenue", "CostOfGoodsSold"],
-    "gross_profit": ["GrossProfit"],
-    "operating_income": ["OperatingIncomeLoss"],
-    "net_income": ["NetIncomeLoss", "ProfitLoss", "NetIncomeLossAvailableToCommonStockholdersBasic"],
-    "eps_diluted": ["EarningsPerShareDiluted", "EarningsPerShareBasicAndDiluted"],
+    "revenue": ["revenue", "revenue_from_operations", "total_income", "net_sales",
+                "income_from_operations", "RevenueFromOperations"],
+    "cost_of_revenue": ["cost_of_materials", "cost_of_revenue", "cost_of_goods_sold",
+                        "CostOfMaterialsConsumed"],
+    "gross_profit": ["gross_profit", "GrossProfit"],
+    "operating_income": ["operating_income", "ebit", "profit_before_tax_and_exceptional",
+                         "ProfitBeforeInterestAndTax", "ebitda"],
+    "net_income": ["net_income", "net_profit", "profit_after_tax", "pat",
+                   "ProfitLossForPeriod"],
+    "eps_diluted": ["eps_diluted", "diluted_eps", "DilutedEarningsPerShare"],
 }
-FLOWS = ("revenue", "cost_of_revenue", "gross_profit", "operating_income", "net_income")
+LINES = ("revenue", "cost_of_revenue", "gross_profit", "operating_income", "net_income")
+FLOWS = LINES   # kept under the old name
 
 
 class FactsError(Exception):
@@ -139,14 +165,14 @@ def facts_for(companyfacts, concept, unit_hint=None):
 
 
 def periods(facts):
-    """{(start, end): fact} for duration facts from 10-Q/10-K.
+    """{(start, end): fact} for duration facts from a reporting filing.
 
     The value comes from the latest filing (restatements win). The fiscal
     label (fy, fp) comes from the first filing that reported the period: a
     later 10-Q that repeats it as a comparison carries its own fy and fp."""
     latest, first = {}, {}
     for f in facts:
-        if "start" not in f or f.get("form", "").split("/")[0] not in ("10-Q", "10-K", "20-F", "40-F"):
+        if "start" not in f or f.get("form", "").split("/")[0] not in DURATION_FORMS:
             continue
         key = (f["start"], f["end"])
         stamp = (f.get("filed", ""), f.get("accn", ""))
@@ -194,7 +220,7 @@ def quarterly(facts, derive_q4=True):
 
 def series(companyfacts, key, derive_q4=True):
     """Quarterly series for a metric, trying its concepts in order and filling gaps."""
-    unit = "USD/shares" if key == "eps_diluted" else "USD"
+    unit = "INR/shares" if key == "eps_diluted" else "INR"
     merged, used = {}, []
     for concept in CONCEPTS[key]:
         q = quarterly(facts_for(companyfacts, concept, unit), derive_q4)
@@ -208,6 +234,70 @@ def series(companyfacts, key, derive_q4=True):
         if added:
             used.append(concept)
     return merged, used
+
+
+def results_to_facts(doc):
+    """An Indian quarterly results table -> the facts structure series() reads.
+
+    Accepts a dict with "quarters", each carrying "end" (YYYY-MM-DD) and any
+    of the line names in CONCEPTS. Values are in rupee CRORE unless
+    "unit" says "inr", in which case they are absolute rupees. EPS is always
+    absolute rupees per share.
+
+    This is the seam that replaces SEC's XBRL company-facts API. The
+    arithmetic above it is unchanged.
+    """
+    if not isinstance(doc, dict):
+        raise FactsError("the results file is not a JSON object")
+    quarters = doc.get("quarters")
+    if not isinstance(quarters, list) or not quarters:
+        raise FactsError("the results file has no \"quarters\" list")
+    scale = 1.0 if str(doc.get("unit") or "crore").lower() == "inr" else float(CRORE)
+    facts = {}
+    for q in quarters:
+        if not isinstance(q, dict):
+            continue
+        end = str(q.get("end") or "").strip()
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", end):
+            raise FactsError("a quarter has no valid \"end\" date: %r" % q.get("end"))
+        start = q.get("start")
+        if not start:
+            d = _date(end)
+            start = (d - _dt.timedelta(days=91)).isoformat()
+        for key, names in CONCEPTS.items():
+            for name in names:
+                if name in q and q[name] is not None:
+                    unit = "INR/shares" if key == "eps_diluted" else "INR"
+                    mult = 1.0 if key == "eps_diluted" else scale
+                    node = facts.setdefault(name, {"units": {}})
+                    node["units"].setdefault(unit, []).append({
+                        "start": start, "end": end, "val": float(q[name]) * mult,
+                        "form": q.get("form") or "results", "fp": q.get("fp") or "",
+                        "fy": _date(end).year, "frame": "",
+                    })
+                    break
+    if not facts:
+        raise FactsError("no known result lines found. Expected some of: %s"
+                         % ", ".join(sorted(set(n for v in CONCEPTS.values() for n in v))))
+    return {"facts": {"us-gaap": facts}, "entityName": doc.get("company") or doc.get("symbol") or ""}
+
+
+def load_results(symbol, from_dir=None, paste=None):
+    """Read a results table from --paste FILE or <DIR>/<SYMBOL>-results.json."""
+    path = paste
+    if not path:
+        if not from_dir:
+            raise FactsError("give --paste FILE or --from DIR with %s-results.json"
+                             % mkt.normalise_symbol(symbol))
+        path = os.path.join(from_dir, "%s-results.json" % mkt.normalise_symbol(symbol))
+    if not os.path.exists(path):
+        raise FactsError("no results file at %s" % path)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except ValueError as exc:
+        raise FactsError("%s is not valid JSON: %s" % (path, exc))
+    return results_to_facts(doc), doc
 
 
 def _yoy_match(series_, end, days=365, slack=10):
@@ -278,18 +368,6 @@ def analyse(companyfacts, quarters=6, name=None):
             "rows": rows, "ttm": ttm, "concepts": concepts}
 
 
-def stale_note(result, filings):
-    """A note when SEC's facts lag a report that is already filed."""
-    rep = (filings or {}).get("report")
-    if not rep or not result["rows"] or not rep.get("period"):
-        return None
-    latest = result["rows"][0]["end"]
-    if rep["period"] > latest and (_date(rep["period"]) - _date(latest)).days > 20:
-        return ("SEC's XBRL facts stop at %s, but a %s for the period ending %s was filed %s. "
-                "Read it directly: %s" % (latest, rep["form"], rep["period"], rep["filed"],
-                                         rep["url"]))
-    return None
-
 
 def changes(result):
     """Plain sentences: what changed in the latest quarter."""
@@ -301,7 +379,7 @@ def changes(result):
     out = []
 
     def money(v):
-        return "n/a" if v is None else "$%.2fB" % (v / 1e9) if abs(v) >= 1e9 else "$%.1fM" % (v / 1e6)
+        return "n/a" if v is None else mkt.format_inr_words(v)
 
     label = "Quarter ending %s%s" % (cur["end"], " (derived from the 10-K)" if cur["derived"] else "")
     line = "%s: revenue %s" % (label, money(cur["revenue"]))
@@ -311,7 +389,7 @@ def changes(result):
     if cur["net_income_yoy"] is not None:
         line += " (%+.1f%%)" % cur["net_income_yoy"]
     if cur["eps_diluted"] is not None:
-        line += ", diluted EPS $%.2f" % cur["eps_diluted"]
+        line += ", diluted EPS %s" % mkt.format_inr_price(cur["eps_diluted"])
         if cur["eps_yoy"] is not None:
             line += " (%+.1f%%)" % cur["eps_yoy"]
     out.append(line + ".")
@@ -333,60 +411,126 @@ def changes(result):
     return out
 
 
-# ---------------------------------------------------------------- filings
-
-EXHIBIT_RANK = [r"ex(?:hibit)?[-_]?99[-_.]?0?1(?!\d)", r"ex(?:hibit)?[-_]?99",
-                r"earnings|release|press", r"ex(?:hibit)?[-_]?\d"]
-
-
-def exhibit_name(names, primary=None):
-    """The press release among a filing's files (EX-99.1 by its usual names)."""
-    docs = [n for n in names if n.lower().endswith((".htm", ".html", ".txt", ".pdf"))
-            and n != primary and not re.match(r"^(R\d+\.htm|\d{10}-\d{2}-\d{6})", n)]
-    for rx in EXHIBIT_RANK:
-        hits = sorted(n for n in docs if re.search(rx, n, re.I))
-        if hits:
-            return hits[0]
-    return None
-
-
-def latest_filings(submissions, cik, fetcher=None):
-    """Newest 10-Q/10-K and newest earnings 8-K (item 2.02) with its EX-99 exhibit."""
-    rec = submissions.get("filings", {}).get("recent", {})
-    out = {"report": None, "earnings_8k": None}
-    base_cik = int(cik)
-    for i, form in enumerate(rec.get("form", [])):
-        acc = rec["accessionNumber"][i]
-        folder = ARCHIVE_URL % (base_cik, acc.replace("-", ""))
-        if out["report"] is None and form in ("10-Q", "10-K", "20-F", "40-F"):
-            out["report"] = {"form": form, "filed": rec["filingDate"][i],
-                             "period": rec["reportDate"][i], "accession": acc,
-                             "url": folder + rec["primaryDocument"][i]}
-        if out["earnings_8k"] is None and form == "8-K" and "2.02" in (rec.get("items", [""] * (i + 1))[i] or ""):
-            e = {"form": form, "filed": rec["filingDate"][i], "accession": acc,
-                 "url": folder + rec["primaryDocument"][i], "exhibit": None,
-                 "index": folder + "%s-index.htm" % acc}
-            if fetcher is not None:
-                try:
-                    idx = fetcher.json(folder + "index.json", os.path.join(acc.replace("-", ""), "index.json"))
-                    names = [it["name"] for it in idx.get("directory", {}).get("item", [])]
-                    pick = exhibit_name(names, rec["primaryDocument"][i])
-                    if pick:
-                        e["exhibit"] = folder + pick
-                except FactsError:
-                    pass
-            out["earnings_8k"] = e
-        if out["report"] and out["earnings_8k"]:
-            break
-    return out
-
 
 # ---------------------------------------------------------------- output
 
+# ---------------------------------------------------------------- flows
+
+def parse_fii_dii(data):
+    """NSE's fiidiiTradeReact JSON -> rows. UNVERIFIED against the live endpoint.
+
+    Shape follows NSE's public API: a list with category, date, buyValue,
+    sellValue and netValue, all in rupee CRORE.
+    """
+    try:
+        doc = json.loads(data.decode("utf-8") if isinstance(data, bytes) else data)
+    except ValueError as exc:
+        raise FactsError("FII/DII data is not JSON: %s" % exc)
+    rows = doc if isinstance(doc, list) else (doc.get("data") or [])
+    out = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        cat = " ".join(str(r.get("category") or "").split())
+        net = r.get("netValue")
+        if net is None and r.get("buyValue") is not None and r.get("sellValue") is not None:
+            try:
+                net = float(str(r["buyValue"]).replace(",", "")) - \
+                      float(str(r["sellValue"]).replace(",", ""))
+            except ValueError:
+                net = None
+        def _f(x):
+            try:
+                return float(str(x).replace(",", ""))
+            except (TypeError, ValueError):
+                return None
+        out.append({"category": cat, "date": str(r.get("date") or ""),
+                    "buy_crore": _f(r.get("buyValue")), "sell_crore": _f(r.get("sellValue")),
+                    "net_crore": _f(net),
+                    "net_inr": (_f(net) * CRORE) if _f(net) is not None else None})
+    return out
+
+
+def parse_indices(data):
+    """NSE's allIndices JSON -> {index name: {last, change_pct}}, India VIX included."""
+    try:
+        doc = json.loads(data.decode("utf-8") if isinstance(data, bytes) else data)
+    except ValueError as exc:
+        raise FactsError("index data is not JSON: %s" % exc)
+    rows = doc.get("data") if isinstance(doc, dict) else doc
+    out = {}
+    for r in (rows or []):
+        if not isinstance(r, dict):
+            continue
+        name = " ".join(str(r.get("index") or r.get("indexSymbol") or "").upper().split())
+        if not name:
+            continue
+        def _f(x):
+            try:
+                return float(str(x).replace(",", ""))
+            except (TypeError, ValueError):
+                return None
+        out[name] = {"last": _f(r.get("last") or r.get("lastPrice")),
+                     "change_pct": _f(r.get("percentChange") or r.get("pChange")),
+                     "prev_close": _f(r.get("previousClose"))}
+    return out
+
+
+def rotation(indices, sectors=SECTOR_INDICES, benchmark=None):
+    """Sector indices ranked by how far they beat or lag the benchmark today."""
+    bench_name = benchmark or mkt.PRIMARY_BENCHMARK
+    bench = (indices.get(bench_name) or {}).get("change_pct")
+    out = []
+    for name in sectors:
+        row = indices.get(name)
+        if not row or row.get("change_pct") is None:
+            continue
+        rel = None if bench is None else round(row["change_pct"] - bench, 2)
+        out.append({"index": name, "change_pct": row["change_pct"], "vs_benchmark": rel})
+    out.sort(key=lambda r: (r["vs_benchmark"] if r["vs_benchmark"] is not None
+                            else r["change_pct"]), reverse=True)
+    return {"benchmark": bench_name, "benchmark_pct": bench, "sectors": out}
+
+
+def flows_report(fii_dii, indices, now_utc):
+    """Plain lines: who bought, what volatility did, which sectors led."""
+    lines = ["Flows, %s IST" % mkt.to_ist(now_utc).strftime("%Y-%m-%d %H:%M")]
+    if fii_dii:
+        for r in fii_dii:
+            if r.get("net_crore") is None:
+                continue
+            side = "bought" if r["net_crore"] > 0 else "sold"
+            lines.append("  %-28s %s %s net%s" % (
+                r["category"][:28], side, mkt.format_inr_words(abs(r["net_inr"])),
+                (" on %s" % r["date"]) if r.get("date") else ""))
+    else:
+        lines.append("  no FII or DII data")
+    vix = indices.get(mkt.VOLATILITY_INDEX) or indices.get("INDIA VIX")
+    if vix and vix.get("last") is not None:
+        move = ("" if vix.get("change_pct") is None
+                else " (%+.2f%% today)" % vix["change_pct"])
+        lines.append("  India VIX %.2f%s" % (vix["last"], move))
+        if vix.get("change_pct") is not None and vix["change_pct"] >= 5:
+            lines.append("    Volatility is rising: stops get hit more often on days like this.")
+    rot = rotation(indices)
+    if rot["sectors"]:
+        bench = ("" if rot["benchmark_pct"] is None
+                 else " (%s %+.2f%%)" % (rot["benchmark"], rot["benchmark_pct"]))
+        lines.append("  Sectors against the benchmark%s:" % bench)
+        for r in rot["sectors"]:
+            rel = "" if r["vs_benchmark"] is None else "  %+.2f%% relative" % r["vs_benchmark"]
+            lines.append("    %-14s %+.2f%%%s" % (r["index"], r["change_pct"], rel))
+    lines.append("")
+    lines.append("Flows are one day's cash-market activity, reported after the close, and "
+                 "they do not predict tomorrow. Not investment advice.")
+    return "\n".join(lines)
+
+
 def _m(v):
+    """A rupee figure in crore, the unit Indian results are reported in."""
     if v is None:
         return "-"
-    return "{:,.0f}".format(v / 1e6)
+    return mkt.group_indian(int(round(v / float(CRORE))))
 
 
 def _p(v):
@@ -398,8 +542,8 @@ def _pm(v):
 
 
 def render(ticker, result, filings):
-    out = ["%s (%s), CIK %s. US$ millions except EPS. Source: SEC XBRL company facts." % (
-        result["entity"], ticker, result["cik"]), ""]
+    out = ["%s (%s). Rupee CRORE except EPS, which is rupees a share. "
+           "Source: the results table you supplied." % (result["entity"] or ticker, ticker), ""]
     out.append("%-11s %-9s %10s %8s %7s %7s %7s %10s %8s %7s" % (
         "quarter end", "fiscal", "revenue", "rev yoy", "gross", "oper", "net",
         "net inc", "EPS dil", "EPS yoy"))
@@ -413,30 +557,19 @@ def render(ticker, result, filings):
     if t:
         out.append("")
         out.append("Last 4 quarters: revenue %s, net income %s, diluted EPS %s." % (
-            "$" + _m(t.get("revenue")) + "M" if t.get("revenue") is not None else "-",
-            "$" + _m(t.get("net_income")) + "M" if t.get("net_income") is not None else "-",
-            "$%.2f" % t["eps_diluted"] if t.get("eps_diluted") is not None else "-"))
+            mkt.RUPEE + _m(t.get("revenue")) + " crore" if t.get("revenue") is not None else "-",
+            mkt.RUPEE + _m(t.get("net_income")) + " crore" if t.get("net_income") is not None else "-",
+            mkt.format_inr_price(t["eps_diluted"]) if t.get("eps_diluted") is not None else "-"))
     out.append("")
     out.append("What changed:")
     for line in changes(result):
         out.append("  - " + line)
-    if filings:
-        out.append("")
-        rep, e8 = filings.get("report"), filings.get("earnings_8k")
-        if rep:
-            out.append("Latest %s: period %s, filed %s  %s" % (rep["form"], rep["period"],
-                                                              rep["filed"], rep["url"]))
-        if e8:
-            out.append("Latest earnings 8-K (item 2.02): filed %s  %s" % (
-                e8["filed"], e8["exhibit"] or e8["index"]))
-    note = stale_note(result, filings)
-    if note:
-        out.append("")
-        out.append("NOTE: " + note)
     if any(r["derived"] for r in result["rows"]):
         out.append("")
-        out.append("Derived quarters are the 10-K year minus the three 10-Qs; derived EPS is "
-                   "approximate.")
+        out.append("A derived quarter is the annual figure minus the three reported quarters; "
+                   "its EPS is approximate.")
+    out.append("")
+    out.append("A quarterly number is not a day-trading signal. Not investment advice.")
     return "\n".join(out) + "\n"
 
 
@@ -457,91 +590,126 @@ def clean_title(title):
     return re.sub(r"\s*/[A-Z]{2,5}/?\s*$", "", title or "").strip() or None
 
 
-def ticker_ciks(fetcher):
-    """ticker -> (10-digit CIK, company name) from company_tickers.json."""
-    data = fetcher.json(TICKERS_URL, "company_tickers.json")
-    out = {}
-    for v in data.values():
-        out.setdefault(v["ticker"].upper().replace("-", "."),
-                       (str(v["cik_str"]).zfill(10), clean_title(v.get("title"))))
-    return out
-
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("tickers", nargs="*", help="tickers, e.g. AAPL KO")
-    ap.add_argument("--cik", help="use this CIK instead of a ticker lookup (one company)")
-    ap.add_argument("--quarters", type=int, default=6)
-    ap.add_argument("--no-filings", action="store_true", help="skip the 8-K and 10-Q links")
-    ap.add_argument("--metrics", metavar="FILE", help="merge a row per ticker into this JSON")
-    ap.add_argument("--user-agent")
-    ap.add_argument("--config", default="trader/config.json")
-    ap.add_argument("--offline", metavar="DIR")
-    ap.add_argument("--json", action="store_true")
-    args = ap.parse_args(argv)
-    if not args.tickers and not args.cik:
+    sub = ap.add_subparsers(dest="cmd")
+
+    p = sub.add_parser("results", help="quarter by quarter from a results table")
+    p.add_argument("symbols", nargs="*", help="NSE symbols, e.g. RELIANCE TCS")
+    p.add_argument("--from", dest="from_dir", metavar="DIR",
+                   help="folder holding <SYMBOL>-results.json")
+    p.add_argument("--paste", metavar="FILE", help="one results table, for one symbol")
+    p.add_argument("--quarters", type=int, default=6)
+    p.add_argument("--metrics", metavar="FILE", help="merge a row per symbol into this JSON")
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("flows", help="FII and DII net, India VIX, sector rotation")
+    p.add_argument("--from", dest="from_dir", metavar="DIR",
+                   help="folder holding fii-dii.json and indices.json")
+    p.add_argument("--now", help='pretend it is this IST time, e.g. "2026-11-02 10:00"')
+    p.add_argument("--json", action="store_true")
+
+    a = ap.parse_args(argv)
+    if not a.cmd:
         ap.print_help()
         return 2
-    ua = user_agent(args.user_agent, args.config)
-    if not ua and not args.offline:
-        print("facts: " + UA_HELP, file=sys.stderr)
-        return 2
-    fetcher = Fetcher(ua, offline=args.offline)
-    results, rows, failed = [], [], 0
+    if a.cmd == "flows":
+        return cmd_flows(a)
+    return cmd_results(a)
+
+
+def _now(text):
+    if not text:
+        return _dt.datetime.utcnow().replace(microsecond=0)
+    t = str(text).strip().replace("Z", "+00:00")
     try:
-        ciks = {} if args.cik else ticker_ciks(fetcher)
+        dt = _dt.datetime.fromisoformat(t)
+    except ValueError:
+        raise FactsError('--now wants a time like "2026-11-02 10:00" (IST) or ...Z (UTC)')
+    if dt.tzinfo is None:
+        return mkt.ist_to_utc(dt)
+    return (dt - dt.utcoffset()).replace(tzinfo=None)
+
+
+def _read_local(from_dir, name):
+    if not from_dir:
+        raise FactsError("give --from DIR with %s (the live NSE endpoints need a cookie and "
+                         "have not been exercised from here)" % name)
+    path = os.path.join(from_dir, name)
+    if not os.path.exists(path):
+        raise FactsError("no %s" % path)
+    with open(path, "rb") as fh:
+        return fh.read()
+
+
+def cmd_flows(a):
+    try:
+        now = _now(a.now)
+        fii = parse_fii_dii(_read_local(a.from_dir, "fii-dii.json"))
+        idx = parse_indices(_read_local(a.from_dir, "indices.json"))
     except FactsError as exc:
         print("facts: %s" % exc, file=sys.stderr)
         return 2
-    wanted = args.tickers or [args.cik]
-    for t in wanted:
-        tick = t.upper()
-        if args.cik:
-            cik, name = str(args.cik).zfill(10), None
-        else:
-            cik, name = ciks.get(tick.replace("-", "."), (None, None))
-        if not cik:
-            print("facts: no SEC CIK for %s (is it a US filer? ETFs and foreign filers "
-                  "may not have XBRL facts)" % tick, file=sys.stderr)
-            failed += 1
-            continue
+    if a.json:
+        print(json.dumps({"checked": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "fii_dii": fii,
+                          "india_vix": idx.get(mkt.VOLATILITY_INDEX),
+                          "rotation": rotation(idx)}, indent=2))
+        return 0
+    print(flows_report(fii, idx, now))
+    return 0
+
+
+def cmd_results(a):
+    symbols = []
+    for chunk in (a.symbols or []):
+        symbols += [x for x in re.split(r"[,\s]+", chunk) if x]
+    if not symbols and a.paste:
+        symbols = ["PASTED"]
+    if not symbols:
+        print("facts: give one or more NSE symbols, with --from DIR or --paste FILE",
+              file=sys.stderr)
+        return 2
+    out, rows, failed = [], [], 0
+    for raw in symbols:
+        sym = mkt.normalise_symbol(raw)
         try:
-            cf = fetcher.json(FACTS_URL % cik, "companyfacts-CIK%s.json" % cik)
-            result = analyse(cf, quarters=args.quarters, name=name)
-            filings = None
-            if not args.no_filings:
-                sub = fetcher.json(SUBMISSIONS_URL % cik, "submissions-CIK%s.json" % cik)
-                filings = latest_filings(sub, cik, fetcher)
+            cf, doc = load_results(sym, a.from_dir, a.paste)
+            result = analyse(cf, quarters=a.quarters, name=doc.get("company"))
         except FactsError as exc:
-            print("facts: %s: %s" % (tick, exc), file=sys.stderr)
+            print("facts: %s: %s" % (sym, exc), file=sys.stderr)
             failed += 1
             continue
-        results.append({"ticker": tick, "result": result, "filings": filings,
-                        "changes": changes(result), "note": stale_note(result, filings)})
-        rows.append(metrics_row(tick, result))
-        if not args.json:
-            sys.stdout.write(render(tick, result, filings))
-            sys.stdout.write("\n")
-    if args.json:
-        print(json.dumps(results, indent=2))
-    if args.metrics and rows:
-        existing = {}
-        if os.path.isfile(args.metrics):
-            with open(args.metrics, encoding="utf-8") as fh:
-                existing = {r["ticker"]: r for r in json.load(fh).get("companies", [])}
+        out.append((sym, result))
+        rows.append(metrics_row(sym, result))
+    if not out:
+        return 1
+    if a.json:
+        print(json.dumps({"results": [dict(r, symbol=s) for s, r in out]}, indent=2,
+                         default=str))
+    else:
+        for i, (sym, result) in enumerate(out):
+            if i:
+                print()
+            print(render(sym, result, []))
+    if a.metrics:
+        merged = {}
+        if os.path.exists(a.metrics):
+            try:
+                with open(a.metrics, encoding="utf-8") as fh:
+                    merged = json.load(fh)
+            except ValueError:
+                merged = {}
+        merged.setdefault("rows", [])
+        by = {r.get("symbol") or r.get("ticker"): r for r in merged["rows"]}
         for r in rows:
-            existing[r["ticker"]] = r
-        folder = os.path.dirname(args.metrics)
-        if folder:
-            os.makedirs(folder, exist_ok=True)
-        with open(args.metrics, "w", encoding="utf-8") as fh:
-            json.dump({"as_of": _dt.date.today().isoformat(),
-                       "companies": sorted(existing.values(), key=lambda r: r["ticker"])},
-                      fh, indent=2)
+            by[r.get("symbol") or r.get("ticker")] = r
+        merged["rows"] = [by[k] for k in sorted(by)]
+        with open(a.metrics, "w", encoding="utf-8") as fh:
+            json.dump(merged, fh, indent=1, sort_keys=True, default=str)
             fh.write("\n")
-        if not args.json:
-            print("wrote %s (%d companies)" % (args.metrics, len(existing)))
-    return 0 if results and not failed else (1 if results else 2)
+        print("\nWrote %s (%d rows)." % (a.metrics, len(merged["rows"])))
+    return 0 if not failed else 1
 
 
 if __name__ == "__main__":

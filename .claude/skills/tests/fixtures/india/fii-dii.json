@@ -1,0 +1,9 @@
+{
+  "_note": "SYNTHETIC. Not real NSE data. Shaped like fiidiiTradeReact.",
+  "data": [
+    {"category": "FII/FPI", "date": "30-Oct-2026", "buyValue": "11250.40",
+     "sellValue": "14980.75", "netValue": "-3730.35"},
+    {"category": "DII", "date": "30-Oct-2026", "buyValue": "12410.10",
+     "sellValue": "9120.60", "netValue": "3289.50"}
+  ]
+}

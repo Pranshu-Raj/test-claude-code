@@ -1,123 +1,110 @@
 ---
 name: trader-analyst
 description: >-
-  The Earnings Analyst. Reads a company's reported numbers straight from SEC
-  EDGAR (XBRL company facts from its 10-Qs and 10-Ks, plus the latest earnings
-  8-K and its press release) and sums up what changed: revenue, gross,
-  operating and net margins, net income and diluted EPS, quarter by quarter,
-  each against the same quarter a year earlier, with the trailing twelve
-  months. Reads an earnings call transcript when you paste one. Use when the
-  user says "how did Tesla's earnings look", "analyze the earnings", "what
-  changed this quarter", "is revenue growing", "check the 10-Q", "compare
-  margins", "sum up the call", "does it report this week", or before trading
-  a stock around its earnings.
-argument-hint: "[tickers]"
+  Earnings and Flows Analyst for Indian equities. Two halves. FUNDAMENTALS:
+  reads a quarterly results table in rupee crore and sums up what changed,
+  quarter by quarter, each against the same quarter a year earlier, with
+  gross, operating and net margins, net income, diluted EPS and the trailing
+  twelve months. FLOWS, which the US pack has no concept of: net FII and DII
+  cash-market activity, India VIX with a warning when volatility is rising,
+  and which sector indices are leading or lagging NIFTY 50 today. Amounts in
+  lakh and crore. Use when the user says "how did Reliance's results look",
+  "analyze the results", "what changed this quarter", "is revenue growing",
+  "compare margins", "FII DII data", "who is buying", "India VIX", "sector
+  rotation", "which sectors are leading", or before trading a stock around
+  its results.
+argument-hint: "[results SYMBOL | flows]"
 ---
 
 # trader-analyst
 
-Earnings move stocks more than anything else on the calendar, and the press
-release is written to put the best number first. This skill reads the numbers
-the company actually filed with the SEC, lines them up quarter by quarter, and
-says plainly what changed. For a day trader it answers two questions before a
-trade: what did the last report say, and is the next one inside this trade?
+Two questions, one skill. What changed in this company's numbers, and where
+is the money going today. Every figure comes from `facts.py`. A quarterly
+number is not a day-trading signal, and this is not investment advice.
+Day trading loses most people money.
 
-Tool in this folder (standard library Python, no keys):
+`${CLAUDE_SKILL_DIR}` below is this skill's folder (where this SKILL.md lives).
 
 ```bash
-python3 "${CLAUDE_SKILL_DIR}/facts.py" --help
+python3 "${CLAUDE_SKILL_DIR}/facts.py" results RELIANCE --from DIR
+python3 "${CLAUDE_SKILL_DIR}/facts.py" results RELIANCE --paste results.json
+python3 "${CLAUDE_SKILL_DIR}/facts.py" flows --from DIR
+python3 "${CLAUDE_SKILL_DIR}/facts.py" results RELIANCE TCS --from DIR --metrics trader/metrics.json
 ```
 
-It needs the SEC User-Agent (`sec_user_agent` in `trader/config.json`, or
-`SEC_USER_AGENT`): "Your Name you@example.com" with the user's real name and
-email. It refuses to call SEC without one.
+## Fundamentals, and why the input changed
 
-## What it reads and writes
+The arithmetic is the US pack's, unchanged and still tested: quarter on
+quarter, year on year, margins at three levels, and a trailing twelve
+months with Q4 derived from the annual figure where a quarter is missing.
 
-- Reads `https://data.sec.gov/api/xbrl/companyfacts/CIK##########.json` (every
-  number the company has tagged in its filings), the company's submissions
-  list (for the newest 10-Q or 10-K and the newest 8-K with item 2.02,
-  "Results of Operations") and that 8-K's folder to find the press release
-  (the EX-99.1 exhibit).
-- Writes `trader/metrics.json` with `--metrics`: one row per company (TTM
-  revenue, net income and diluted EPS, the latest margins and growth), for
-  your notes or a spreadsheet. `metrics.example.json` in this folder is a
-  real run for AAPL, AXP, GOOGL, KO and BAC on 2026-10-13.
-- Earnings calls: the tool does not fetch transcripts. If the user pastes one
-  (or the company's IR page has it), read it and sum up what management said
-  changed: guidance, margins, demand, anything they declined to answer.
-- The next report date is not in SEC data. Look for it in `/trader-news`
-  headlines or on the company's investor relations page, and say where it
-  came from.
+What changed is the source. The US version read SEC's XBRL company-facts
+API: one free, structured, uniform endpoint keyed by CIK, in us-gaap tags.
+**India has no equivalent.** Companies file results with the exchanges as
+PDFs and XBRL of uneven quality, and there is no free API that normalises
+them across companies. Pretending otherwise would have produced a skill that
+breaks on the second symbol you try.
 
-## The rules
+So the input is a small results table you save or paste:
 
-- **Filed numbers first.** The table comes from XBRL facts the company filed.
-  Use the press release for context (guidance, segment colour), and say which
-  numbers came from where.
-- **Compare like with like.** Growth is against the same quarter a year
-  earlier. Quarter-on-quarter changes are shown but many businesses are
-  seasonal (Apple's December quarter is always its biggest).
-- **Say what is derived.** Companies do not file a Q4 10-Q. The fourth
-  quarter is the 10-K year minus the three quarters inside it and is marked
-  "derived"; derived EPS is approximate.
-- **Say when the data lags.** SEC's facts API can trail a filing. When the
-  newest 10-Q is later than the newest quarter in the facts, the tool prints a
-  NOTE with the link: read the 10-Q itself before summarising.
-- **Flag one-offs.** When net income is above operating income, gains outside
-  the business (investment marks, tax items) are inside it. The tool says so.
-  Banks and insurers have no gross margin: blank, not zero.
+```json
+{"symbol": "RELIANCE", "unit": "crore",
+ "quarters": [
+   {"end": "2026-09-30", "revenue": 258000, "cost_of_materials": 172000,
+    "operating_income": 42000, "net_income": 19500, "eps_diluted": 28.8}
+ ]}
+```
+
+Values are in rupee crore unless `"unit": "inr"`. EPS is always rupees a
+share. Several line names are accepted per metric
+(`revenue_from_operations`, `total_income`, `net_sales`, `profit_after_tax`,
+`pat` and so on) because filings differ. Put the file at
+`<DIR>/<SYMBOL>-results.json` and use `--from DIR`, or pass one with
+`--paste`.
+
+## Flows, which matter more intraday
+
+| what | why it matters |
+| --- | --- |
+| FII and DII net | who was actually buying the cash market, in crore |
+| India VIX | with a flag when it jumps, because rising volatility hits stops |
+| Sector rotation | each sector index against NIFTY 50 today, ranked |
+
+A heavy FII sell day with VIX up is a different market from a quiet one,
+whatever an individual chart says. The US pack has no equivalent: it never
+modelled flows or a volatility index at all.
+
+Flows are one day's activity, reported after the close. They describe what
+happened; they do not predict tomorrow.
+
+## Honest status
+
+**Unverified live.** The NSE endpoints for FII/DII, indices and results
+follow NSE's published JSON, but this port was written where those hosts are
+unreachable, so no live call has been made, and NSE needs a browser user
+agent and a primed cookie. Saved and pasted inputs are the tested path, and
+`--from DIR` is how the skill is meant to be used until you have confirmed a
+live route.
+
+Tested offline: the results adapter, the quarterly and year-on-year
+arithmetic, margins, the trailing twelve months, crore formatting, FII/DII
+parsing, VIX reading, and the sector ranking against the benchmark.
 
 ## Steps
 
-1. Run it for the companies in question (or the tickers on
-   `trader/watchlist.json`):
-
-   ```bash
-   python3 "${CLAUDE_SKILL_DIR}/facts.py" TSLA
-   python3 "${CLAUDE_SKILL_DIR}/facts.py" TSLA NVDA AMD --metrics trader/metrics.json
-   ```
-
-   `--quarters 8` shows two years, `--json` everything machine-readable,
-   `--cik` a company without a ticker.
-2. Open the latest earnings press release (the EX-99 link) and the 10-Q when
-   the numbers need context, and read them.
-3. Write the summary: one line on the quarter (revenue, EPS, growth), one on
-   margins, one on anything unusual (a one-off, a derived quarter, data that
-   lags), and the links. Plain words, real numbers, no adjectives the numbers
-   do not support.
-4. If the next report falls inside the planned trade (an overnight hold, or a
-   report before the open), say it before `/trader-exit` sets the stop: a stop
-   does not protect against a gap, the stock can open past it.
-
-## Example: the reel's stock
-
-`facts.py TSLA` (run 2026-10-20): quarter ending 2026-06-30 (Q2 2026),
-revenue $28.24B, +25.5% against a year earlier, net income $1.11B (-4.9%),
-diluted EPS $0.32 (-3.0%); gross margin 16.8% (-4.3 points on the quarter
-before), operating margin 1.4%; last four quarters $103.6B revenue and $1.08
-EPS. The tool flags that net income is above operating income, so gains
-outside the business are inside it. Latest 10-Q filed 2026-07-23. Monday's
-headlines said Tesla reports this week, so the summary ends: "The next report
-is days away. A day trade that closes before the bell is not exposed to it;
-anything held overnight is."
-
-`facts.py AAPL` (2026-10-13): revenue $109.42B, +16.4% against a year
-earlier, diluted EPS $2.02 (+28.7%). For Coca-Cola the tool noted that SEC's
-facts stopped at 2026-04-03 while the 10-Q for 2026-07-03 was already filed,
-so the summary read that 10-Q directly.
-
-## What it never does
-
-- Never says a stock is cheap, expensive, a buy or a sell. It reports what
-  the company filed.
-- Never invents a number the filings do not have, or estimates a quarter it
-  cannot derive.
-- Never calls SEC without the User-Agent, and stays well under 10 requests a
-  second.
+1. Before trading a stock around its results, run `results` on it. A
+   breakout through a result is a coin flip on the number.
+2. Run `flows` in the morning for the market's mood.
+3. Neither is a signal. They are context for a decision `/trader-exit` and
+   `/trader-risk` still have to pass.
 
 ## Safety
 
-Education and tooling, not financial advice. This skill only reads filings.
-Nothing places an order except `/trader-broker`, after `/trader-risk` passes
-and the user types an explicit yes for that order.
+- Education and tooling, not financial advice. A PASS is a rules check, not a recommendation.
+- Paper trading by default (`"paper": true`). Going live is the user's own decision, in their own config.
+- Nothing in this pack places an order except trader-broker, and only when all three hold: trader-risk
+  passed that exact order today, the user typed an explicit yes for that one order in the chat, and the
+  user clicked Allow once on Claude's own card because the order tool is set to "Needs approval"
+  (Customize > Connectors > tool permissions). Never set an order tool to "Always allow".
+- No options, margin, short selling or leverage unless the config allows it and the user confirms.
+- Broker keys live in environment variables or the Claude Desktop config, never in the chat.
