@@ -20,6 +20,7 @@ from decimal import Decimal
 from _load import load, FIX, ROOT
 
 exitp = load("trader-exit", "exit")
+entry = load("trader-entry", "entry")
 
 INDIA_FIX = os.path.join(FIX, "india")
 
@@ -213,6 +214,19 @@ class Cli(unittest.TestCase):
     def read_plan(self):
         with open(os.path.join("trader", "plan.json")) as fh:
             return json.load(fh)
+
+    def test_trader_entry_writes_what_this_skill_reads(self):
+        # the real chain: entry.py --write, then exit.py with no flags
+        code, _, err = run(entry, ["check", "TCS", "--adapter", "offline", "--data", INDIA_FIX,
+                                   "--now", "2026-11-02 09:51", "--write"])
+        self.assertEqual(code, 0, err)
+        code, text, err = self.plan("--target", "1R", "--write")
+        self.assertEqual(code, 0, err)
+        p = self.read_plan()
+        self.assertEqual(p["entry"], 4026.50)
+        self.assertEqual(p["stop"], 4008.00)
+        self.assertEqual(p["target"], 4045.00)
+        self.assertEqual(p["entry_time"], "09:50")
 
     def test_entry_json_to_plan_json(self):
         self.write(os.path.join("trader", "entry.json"), INDIA_ENTRY)

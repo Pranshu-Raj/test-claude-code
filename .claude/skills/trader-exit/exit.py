@@ -144,8 +144,8 @@ def hm(t):
 
 
 def ampm(t):
-    h = t.hour % 12 or 12
-    return "%d:%02d %s" % (h, t.minute, "AM" if t.hour < 12 else "PM")
+    """IST, 24-hour. Kept under the old name."""
+    return "%02d:%02d" % (t.hour, t.minute)
 
 
 def session(d):
