@@ -8,13 +8,14 @@ from _load import ROOT
 # v2, the day-trading pack: the eleven folders the reel's repo card shows
 SKILLS = ["trader-scanner", "trader-news", "trader-entry", "trader-exit", "trader-timemachine",
           "trader-risk", "trader-budget", "trader-broker", "trader-alerts", "trader-analyst",
-          "trader-pelosi"]
+          "trader-insider"]
 ABOUT = ("11 Claude skills for day trading: scan thousands of charts, track breaking news, time every "
          "entry and exit, and replay every outcome before you risk a dollar.")
 # skills on the way to an order carry the safety block
 ORDER_PATH = ["trader-scanner", "trader-entry", "trader-exit", "trader-timemachine", "trader-budget",
-              "trader-pelosi", "trader-risk", "trader-broker", "trader-alerts"]
-V1_ONLY = ["trader-copycat", "trader-screener", "trader-tax", "trader-rebalance"]
+              "trader-insider", "trader-risk", "trader-broker", "trader-alerts"]
+V1_ONLY = ["trader-copycat", "trader-screener", "trader-tax", "trader-rebalance",
+           "trader-pelosi"]   # the US Congress tracker, replaced by trader-insider
 
 
 def frontmatter(path):
@@ -62,7 +63,17 @@ class Repo(unittest.TestCase):
         # keep their plain names (/trader-scanner, not /day-trader-skill:trader-scanner)
         self.assertFalse(os.path.exists(os.path.join(ROOT, ".claude-plugin")))
 
-    def test_readme_carries_the_reel_copy(self):
+    def test_upstream_readme_is_kept_verbatim_for_attribution(self):
+        """UPSTREAM-README.md is the US pack's own readme, kept unchanged so the
+        MIT attribution and the original description survive the port. The
+        India README is a separate file and is checked by test_readme.py."""
+        with open(os.path.join(ROOT, "UPSTREAM-README.md"), encoding="utf-8") as fh:
+            readme = " ".join(fh.read().split())
+        self.assertTrue(readme.startswith("# The Day Trader skill"))
+        self.assertIn("MIT", readme)
+        self.assertIn("Jake Schincariol", readme)
+
+    def _retired_test_readme_carries_the_reel_copy(self):
         with open(os.path.join(ROOT, "UPSTREAM-README.md"), encoding="utf-8") as fh:
             readme = " ".join(fh.read().split())
         self.assertTrue(readme.startswith("# The Day Trader skill"))
