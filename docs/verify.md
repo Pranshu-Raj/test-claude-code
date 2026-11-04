@@ -5,8 +5,11 @@ exception now settled: the NSE holiday calendar is the published 2026 list,
 supplied on 2026-11-04. Rates still change by circular and index membership
 changes at review.
 
-Run `python3 .claude/skills/config/india_market.py` to print this list from
-the code itself. There are **44 VERIFY markers** across the port.
+Run `python3 .claude/skills/config/india_market.py` to print the checklist
+from the code itself. It names the **26 values** the config can enumerate,
+14 of them cost rates. Counting every `VERIFY` comment line in the source
+instead, including those inside the skills, there are **44 VERIFY markers**
+across the port. Both numbers are pinned by tests, so neither can drift.
 
 ## 1. Blocking: do these first
 
