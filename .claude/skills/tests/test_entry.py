@@ -242,7 +242,17 @@ class Contract(unittest.TestCase):
         self.assertNotIn("$", text)
         self.assertNotIn(" ET ", text)
         self.assertNotIn("AM", text)
-        self.assertIn("not been verified", text)                        # the calendar warning
+        self.assertNotIn("Calendar:", text)   # the list is official now
+
+    def test_the_muhurat_window_warning_reaches_the_user(self):
+        """NSE publishes the Muhurat DATE with the holiday list but its
+        TIMINGS in a later circular, so that one warning must survive even
+        though the rest of the calendar is now official."""
+        code, text, err = run(["check", "TCS", "--adapter", "offline", "--data", INDIA_FIX,
+                               "--now", "2026-11-08 18:30"])
+        self.assertIn("Calendar:", text)
+        self.assertIn("placeholder", text)
+        self.assertIn("circular", text)
 
     def test_json_output(self):
         code, text, err = run(["check", "TCS", "--adapter", "offline", "--data", INDIA_FIX,

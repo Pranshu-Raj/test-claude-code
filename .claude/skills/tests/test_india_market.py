@@ -88,15 +88,47 @@ class Calendar(unittest.TestCase):
         self.assertIsNotNone(s)
         self.assertEqual(s, (datetime.time(18, 15), datetime.time(19, 15)))
 
-    def test_shipped_calendar_declares_itself_unverified(self):
-        self.assertFalse(mkt.CALENDAR_VERIFIED)
-        self.assertIn("not been verified", mkt.calendar_warning())
+    def test_the_calendar_is_the_official_list(self):
+        self.assertTrue(mkt.CALENDAR_VERIFIED)
+        self.assertEqual(mkt.calendar_warning(), "")        # nothing left to warn about
 
-    def test_lunar_dates_are_marked_as_estimates(self):
+    def test_every_holiday_row_is_official_not_an_estimate(self):
         conf = mkt.holiday_confidence()
-        self.assertEqual(conf["2026-01-26"], "fixed")       # Republic Day
-        self.assertEqual(conf["2026-03-04"], "estimate")    # Holi
-        self.assertTrue(any(v == "estimate" for v in conf.values()))
+        self.assertEqual(len(conf), 16)
+        self.assertEqual(sorted(set(conf.values())), ["official"])
+
+    def test_the_official_dates_that_my_estimates_had_wrong(self):
+        """These five were guessed before the published list arrived: three
+        lunar dates off by one, one holiday that is not on the list at all,
+        and one that falls on a Saturday. Pinned so they cannot drift back."""
+        h = mkt.load_holidays()
+        self.assertIn("2026-03-03", h)          # Holi, not 03-04
+        self.assertNotIn("2026-03-04", h)
+        self.assertIn("2026-05-28", h)          # Bakri Id, not 05-27
+        self.assertNotIn("2026-05-27", h)
+        self.assertIn("2026-11-10", h)          # Diwali-Balipratipada, not 11-09
+        self.assertNotIn("2026-11-09", h)
+        self.assertNotIn("2026-03-21", h)       # Ramzan Id is not on the list
+        self.assertNotIn("2026-08-15", h)       # Independence Day is a Saturday
+
+    def test_the_dates_only_the_official_list_could_supply(self):
+        h = mkt.load_holidays()
+        self.assertIn("Municipal Corporation Election", h["2026-01-15"])
+        self.assertIn("Ram Navami", h["2026-03-26"])
+        self.assertIn("Muharram", h["2026-06-26"])
+
+    def test_the_muhurat_date_is_official_but_its_window_is_not(self):
+        import datetime as _d
+        sp = mkt.load_special_sessions()["2026-11-08"]
+        self.assertEqual(sp["date_confidence"], "official")
+        self.assertEqual(sp["window_confidence"], "placeholder")
+        warn = mkt.calendar_warning(_d.date(2026, 11, 8))
+        self.assertIn("placeholder", warn)
+        self.assertIn("circular", warn)
+
+    def test_an_ordinary_day_warns_about_nothing(self):
+        import datetime as _d
+        self.assertEqual(mkt.calendar_warning(_d.date(2026, 11, 3)), "")
 
     def test_a_year_with_no_calendar_warns_loudly(self):
         w = mkt.calendar_warning(datetime.date(2031, 6, 2))

@@ -53,9 +53,14 @@ news / analyst / insider                            (on a schedule)
 
 ## Before you trade: verify the numbers
 
-**The shipped values are defaults, not authority.** Rates change by circular,
-index membership changes at review, and the holiday dates for lunar festivals
-in this repo were written from memory, not downloaded.
+**Most shipped values are defaults, not authority.** Rates change by circular
+and index membership changes at review.
+
+The NSE **holiday calendar is now the published 2026 list** and
+`CALENDAR_VERIFIED` is `True`, so the skills no longer warn about it. One
+thing is still open: NSE gives the Muhurat DATE with the holiday list but its
+TIMINGS in a separate circular, so the 08-Nov-2026 window is a placeholder and
+the skills say so on that date.
 
 ```bash
 python3 .claude/skills/config/india_market.py
@@ -64,16 +69,17 @@ python3 .claude/skills/config/india_market.py
 That prints every value needing a human check. The full list, with sources, is
 in [docs/verify.md](docs/verify.md). At minimum, before real money:
 
-1. `config/data/nse_holidays.csv` from NSE's annual circular, then set
-   `CALENDAR_VERIFIED = True`.
+1. ~~`config/data/nse_holidays.csv`~~ **done**: NSE's published 2026 list,
+   16 holidays, `CALENDAR_VERIFIED = True`.
 2. `config/data/nse_universe.csv` from niftyindices.com and NSE's
    `EQUITY_L.csv`, with the price band per symbol.
 3. Every rate in `COSTS` against your broker's tariff and the current STT,
    stamp duty and GST rates.
 4. `BROKER_SQUARE_OFF` against your own broker's policy. They differ.
+5. The Muhurat window, once NSE issues the timing circular.
 
-Until you do, the skills print a warning saying the calendar and universe are
-unverified. That is deliberate.
+Until you do, the skills print a warning saying the universe is unverified,
+and one on the Muhurat date about its window. That is deliberate.
 
 ## Setting up a broker
 

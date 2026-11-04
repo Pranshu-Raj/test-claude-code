@@ -297,14 +297,14 @@ including `ticket.py show` works; only the actual placement needs one.
 
 ### 5. The data files you maintain (required before real money)
 
-These are the ones that silently give wrong answers if stale. **The shipped
-rows are templates written from memory, not downloaded.** The skills print a
-warning until you replace them.
+These are the ones that silently give wrong answers if stale. The holiday
+calendar is done: it is NSE's published 2026 list. The other three are still
+templates, and the skills warn until you replace them.
 
 | file | from | how often |
 | --- | --- | --- |
-| `config/data/nse_holidays.csv` | NSE's annual Trading Holidays circular | yearly. Then set `CALENDAR_VERIFIED = True` |
-| `config/data/nse_special_sessions.csv` | NSE's Muhurat Trading circular | yearly |
+| `config/data/nse_holidays.csv` | **done for 2026** (NSE's published list). Redo yearly and raise `CALENDAR_YEARS` | yearly |
+| `config/data/nse_special_sessions.csv` | date done for 2026; the WINDOW needs NSE's Muhurat timing circular | yearly |
 | `config/data/nse_universe.csv` | niftyindices.com factsheets, NSE `EQUITY_L.csv`, NSE's daily price-bands file | every index review |
 | `config/data/rbi_dates.csv` | RBI's MPC schedule | yearly |
 

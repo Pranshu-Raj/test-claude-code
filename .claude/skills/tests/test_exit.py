@@ -299,11 +299,21 @@ class Cli(unittest.TestCase):
         code, _, err = self.plan("--entry", "4026.50")
         self.assertEqual(code, 0, err)
 
-    def test_the_calendar_warning_reaches_the_user(self):
+    def test_an_ordinary_day_carries_no_calendar_warning(self):
+        # the calendar is the published list now, so a normal session is quiet
         self.write(os.path.join("trader", "entry.json"), INDIA_ENTRY)
         code, text, _ = self.plan()
-        self.assertIn("Calendar:", text)
-        self.assertIn("not been verified", text)
+        self.assertNotIn("Calendar:", text)
+
+    def test_a_muhurat_session_is_refused_as_too_short_to_day_trade(self):
+        """The Muhurat window is about an hour, which leaves no room for an
+        entry, a flat-by and a broker square-off. Refusing beats warning."""
+        self.write(os.path.join("trader", "entry.json"),
+                   dict(INDIA_ENTRY, date="2026-11-08"))
+        code, text, err = run(exitp, ["plan", "--now", "2026-11-08 18:30", "--target", "1R"])
+        self.assertEqual(code, 1)
+        self.assertIn("too short to day trade", text + err)
+        self.assertIn("18:15-19:15", text + err)
 
     def test_show_without_a_plan(self):
         code, text, _ = run(exitp, ["show"])

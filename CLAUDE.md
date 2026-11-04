@@ -29,6 +29,8 @@
   charges included, so trader-budget sizes down accordingly. If you change
   anything in the sizing or risk path, keep that true.
 - Every trading number is computed by the Python tools, never by the model.
-- Before relying on any value, see `docs/verify.md`. The shipped holiday dates
-  and universe are templates written from memory, not downloaded, and the
-  skills warn about it until replaced.
+- Before relying on any value, see `docs/verify.md`. The NSE holiday calendar
+  is the published 2026 list and `CALENDAR_VERIFIED` is True; the universe and
+  the cost rates are still templates and the skills warn until replaced. The
+  Muhurat DATE is official but its WINDOW is a placeholder until NSE issues
+  the timing circular, and `calendar_warning()` says so on that date.

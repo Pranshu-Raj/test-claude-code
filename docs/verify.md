@@ -1,12 +1,12 @@
 # Values you must verify before trading real money
 
-Every value below is a default I set, not a fact I confirmed. Rates change by
-circular, index membership changes at review, and the religious-holiday dates
-in this repo were written from memory because the environment this port was
-built in cannot reach NSE.
+Every value below is a default I set, not a fact I confirmed, with one
+exception now settled: the NSE holiday calendar is the published 2026 list,
+supplied on 2026-11-04. Rates still change by circular and index membership
+changes at review.
 
 Run `python3 .claude/skills/config/india_market.py` to print this list from
-the code itself. There are **46 VERIFY markers** across the port.
+the code itself. There are **44 VERIFY markers** across the port.
 
 ## 1. Blocking: do these first
 
@@ -15,8 +15,8 @@ them until you act.
 
 | what | where | source to check against |
 | --- | --- | --- |
-| The NSE holiday calendar, every row | `config/data/nse_holidays.csv` | NSE's annual Trading Holidays circular. The `confidence=estimate` rows are lunar-calendar dates and are NOT reliable. Then set `CALENDAR_VERIFIED = True` |
-| The Muhurat session window | `config/data/nse_special_sessions.csv` | NSE's Muhurat Trading circular for that year |
+| ~~The NSE holiday calendar~~ **DONE** | `config/data/nse_holidays.csv` | NSE's published 2026 list, 16 rows, all `confidence=official`. `CALENDAR_VERIFIED` is `True`. Re-do for 2027 and raise `CALENDAR_YEARS` |
+| The Muhurat session WINDOW | `config/data/nse_special_sessions.csv` | The 08-Nov-2026 date is official; NSE notifies timings in a separate circular, so `18:15-19:15` is a placeholder and `window_confidence` says so. The skills warn on that date |
 | The universe, every row and band | `config/data/nse_universe.csv` | niftyindices.com factsheets for index membership; NSE `EQUITY_L.csv` for the symbol list; NSE's daily price-bands file for `band_pct` |
 | Your broker's square-off time | `BROKER_SQUARE_OFF` in `config/india_market.py` | your broker's own intraday policy page. Zerodha, Upstox, Angel One and Dhan differ, roughly 15:15 to 15:25 |
 

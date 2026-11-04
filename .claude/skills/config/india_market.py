@@ -156,29 +156,45 @@ def load_special_sessions(path=None):
     out = {}
     for r in _read_csv(path or SPECIAL_FILE, "date"):
         out[r["date"]] = {"name": r.get("name") or "", "kind": r.get("kind") or "special",
-                          "open": r.get("open") or "", "close": r.get("close") or ""}
+                          "open": r.get("open") or "", "close": r.get("close") or "",
+                          "date_confidence": (r.get("date_confidence") or "estimate").strip(),
+                          "window_confidence": (r.get("window_confidence") or "estimate").strip()}
     return out
 
 
-# The shipped calendar has not been checked against NSE's circular, and the
-# lunar-calendar dates in it are estimates. Skills surface this as a warning
-# rather than silently treating an unlisted holiday as a trading day.
-# Set to True only once you have replaced data/nse_holidays.csv from the
-# official source and checked every row.
-CALENDAR_VERIFIED = False
+# data/nse_holidays.csv now holds NSE's published 2026 list, supplied by the
+# repo owner on 2026-11-04, so the holiday dates are no longer estimates.
+# Set this back to False if you replace the file with anything unchecked, and
+# raise CALENDAR_YEARS when you add another year.
+CALENDAR_VERIFIED = True
 
 CALENDAR_YEARS = (2026,)  # years the shipped file covers at all
 
 
 def calendar_warning(d=None):
-    """A sentence to print when the calendar cannot be trusted, else ''."""
+    """A sentence to print when something about the calendar cannot be trusted.
+
+    Three separate things can be wrong, and they clear independently:
+    the year may not be covered at all, the holiday list may be unverified,
+    or a special session's date may be official while its WINDOW is still a
+    placeholder (which is exactly where NSE leaves Muhurat until it issues the
+    timing circular).
+    """
     if d is not None and d.year not in CALENDAR_YEARS:
         return ("No NSE holiday list for %d: every weekday looks like a trading day. "
-                "Update config/data/nse_holidays.csv." % d.year)
+                "Update config/data/nse_holidays.csv and CALENDAR_YEARS." % d.year)
     if not CALENDAR_VERIFIED:
         return ("The NSE holiday list has not been verified against NSE's circular "
                 "(config.india_market.CALENDAR_VERIFIED is False); religious-holiday "
                 "dates in it are estimates.")
+    if d is not None:
+        sp = load_special_sessions().get(d.isoformat())
+        if sp and sp.get("window_confidence") != "official":
+            return ("%s on %s: the date is official but the %s to %s window is a "
+                    "placeholder, because NSE notifies Muhurat timings in a separate "
+                    "circular. Check it before trading that session."
+                    % (sp.get("name") or "special session", d.isoformat(),
+                       sp.get("open"), sp.get("close")))
     return ""
 
 

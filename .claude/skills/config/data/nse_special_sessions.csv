@@ -1,10 +1,19 @@
 # Sessions that do not follow the normal 09:15-15:30 timetable.
 #
-# kind=muhurat   the ceremonial Diwali session, roughly one hour in the
-#                evening. NSE announces the exact window by circular each year.
+# kind=muhurat   the ceremonial Diwali session.
 #
-# VERIFY: every row. Source: NSE circulars (Muhurat Trading).
-# Unlike the NYSE 1:00 p.m. early close this replaces, an Indian special
-# session is usually an EXTRA window on a day that is otherwise closed.
-date,name,kind,open,close
-2026-11-08,Muhurat Trading (Diwali Laxmi Pujan),muhurat,18:15,19:15
+# SOURCE: NSE's 2026 trading holiday list, supplied by the repo owner on
+# 2026-11-04, which states: "Muhurat Trading will be conducted on Sunday,
+# November 08, 2026 on account of Diwali Laxmi Pujan. Timings of Muhurat
+# Trading shall be notified subsequently through a circular."
+#
+# So the DATE is official and the WINDOW below is NOT. The open and close are
+# a placeholder from a typical recent year. window_confidence says so, and
+# india_market.calendar_warning() surfaces it on that date, so no skill can
+# quietly treat a guessed window as fact. Replace the times from NSE's
+# Muhurat circular when it is published.
+#
+# Unlike the US 1:00 p.m. early close this replaces, an Indian special session
+# is usually an EXTRA window on a day that is otherwise closed.
+date,name,kind,open,close,date_confidence,window_confidence
+2026-11-08,Muhurat Trading (Diwali Laxmi Pujan),muhurat,18:15,19:15,official,placeholder
