@@ -30,6 +30,12 @@
 - Paper trading only. Nothing here may place a real order. An order needs all
   three gates: a trader-risk PASS for that exact order today, the user's typed
   yes for that one order, and Claude's own Allow once card.
+- `.mcp.json` registers Zerodha's hosted MCP server (`mcp.kite.trade`). It is
+  for capturing real fixtures and for interactive quotes, NEVER a data path:
+  an MCP payload is written to a file verbatim and read back by the `offline`
+  adapter, so the model never transcribes a number into a tool. The hosted
+  endpoint carries no order tools; if anyone self-hosts it, the order and GTT
+  tools stay in `EXCLUDED_TOOLS`. See `docs/how-it-works.md` section 3a.
 - Costs are not cosmetic here. `max_loss_per_trade_inr` means the NET loss,
   charges included, so trader-budget sizes down accordingly. If you change
   anything in the sizing or risk path, keep that true.
