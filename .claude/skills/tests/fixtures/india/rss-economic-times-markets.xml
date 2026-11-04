@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SYNTHETIC. Not a real feed. Shaped like a publisher RSS item list. -->
+<rss version="2.0"><channel>
+  <title>Synthetic Markets Feed</title>
+  <item>
+    <title>Reliance Industries Q2 results beat estimates, revenue up 11%</title>
+    <description>SYNTHETIC. The company reported higher revenue and margins for the quarter.</description>
+    <link>https://example.invalid/synthetic/reliance-q2</link>
+    <guid>synthetic-ril-q2</guid>
+    <pubDate>Mon, 02 Nov 2026 03:34:00 GMT</pubDate>
+  </item>
+  <item>
+    <title>RBI expected to hold repo rate at December MPC, say economists</title>
+    <description>SYNTHETIC. Monetary policy commentary.</description>
+    <link>https://example.invalid/synthetic/rbi-hold</link>
+    <guid>synthetic-rbi-hold</guid>
+    <pubDate>Mon, 02 Nov 2026 02:10:00 GMT</pubDate>
+  </item>
+  <item>
+    <title>TCS bags large deal from European retailer</title>
+    <description>SYNTHETIC. Order win commentary.</description>
+    <link>https://example.invalid/synthetic/tcs-deal</link>
+    <guid>synthetic-tcs-deal</guid>
+    <pubDate>Mon, 02 Nov 2026 04:05:00 GMT</pubDate>
+  </item>
+</channel></rss>

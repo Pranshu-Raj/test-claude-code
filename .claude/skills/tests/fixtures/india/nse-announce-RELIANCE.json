@@ -1,0 +1,23 @@
+[
+  {
+    "symbol": "RELIANCE",
+    "desc": "Financial Results for the quarter ended September 2026",
+    "attchmntFile": "https://example.invalid/synthetic/ril-results.pdf",
+    "attchmntText": "SYNTHETIC. Unaudited financial results for Q2.",
+    "exchdisstime": "02-Nov-2026 09:05:00"
+  },
+  {
+    "symbol": "RELIANCE",
+    "desc": "Disclosure under Regulation 7(2) of SEBI (Prohibition of Insider Trading) Regulations",
+    "attchmntFile": "https://example.invalid/synthetic/ril-pit.pdf",
+    "attchmntText": "SYNTHETIC. Designated person trade disclosure.",
+    "exchdisstime": "02-Nov-2026 09:20:00"
+  },
+  {
+    "symbol": "RELIANCE",
+    "desc": "Pledge of shares by promoter",
+    "attchmntFile": "https://example.invalid/synthetic/ril-pledge.pdf",
+    "attchmntText": "SYNTHETIC. Creation of encumbrance.",
+    "exchdisstime": "01-Nov-2026 18:00:00"
+  }
+]

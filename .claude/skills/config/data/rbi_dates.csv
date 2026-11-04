@@ -1,0 +1,13 @@
+# RBI Monetary Policy Committee and other dates that move Indian markets.
+#
+# VERIFY AND MAINTAIN THIS FILE. Source: RBI's press releases and its annual
+# MPC meeting schedule, https://www.rbi.org.in
+# A policy day moves banks, rate-sensitive names and the index, so trading a
+# breakout through one is a different trade.
+date,event,note
+2026-02-06,MPC policy decision,bi-monthly statement
+2026-04-08,MPC policy decision,bi-monthly statement
+2026-06-05,MPC policy decision,bi-monthly statement
+2026-08-06,MPC policy decision,bi-monthly statement
+2026-10-01,MPC policy decision,bi-monthly statement
+2026-12-04,MPC policy decision,bi-monthly statement

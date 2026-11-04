@@ -1,0 +1,19 @@
+{
+  "_note": "SYNTHETIC. Not real filings. Shaped like a quarterly results table.",
+  "symbol": "RELIANCE", "company": "Reliance Industries Limited",
+  "unit": "crore", "currency": "INR",
+  "quarters": [
+    {"end": "2026-09-30", "revenue": 258000, "cost_of_materials": 172000,
+     "operating_income": 42000, "net_income": 19500, "eps_diluted": 28.8},
+    {"end": "2026-06-30", "revenue": 249000, "cost_of_materials": 168000,
+     "operating_income": 40100, "net_income": 18200, "eps_diluted": 26.9},
+    {"end": "2026-03-31", "revenue": 241000, "cost_of_materials": 163500,
+     "operating_income": 38800, "net_income": 17600, "eps_diluted": 26.0},
+    {"end": "2025-12-31", "revenue": 236000, "cost_of_materials": 161000,
+     "operating_income": 37200, "net_income": 16900, "eps_diluted": 25.0},
+    {"end": "2025-09-30", "revenue": 232000, "cost_of_materials": 159000,
+     "operating_income": 36000, "net_income": 16100, "eps_diluted": 23.8},
+    {"end": "2025-06-30", "revenue": 228000, "cost_of_materials": 157000,
+     "operating_income": 35100, "net_income": 15600, "eps_diluted": 23.1}
+  ]
+}

@@ -1,0 +1,31 @@
+# NSE trading holidays, Capital Market segment. One row per full-day closure.
+#
+# SOURCE: NSE's annual trading holiday list for 2026, supplied by the repo
+# owner on 2026-11-04. These are the official dates, not estimates.
+#
+# Weekends are handled in code and are not listed here. NSE also publishes a
+# separate list of holidays that fall on a Saturday or Sunday; those need no
+# row, because the weekend rule already closes them.
+#
+# confidence=official  from the published list
+# confidence=estimate  not confirmed against a circular. There are none now.
+#
+# Re-check for 2027: this file covers 2026 only, and CALENDAR_YEARS in
+# india_market.py must grow with it or every 2027 weekday looks tradable.
+date,name,confidence
+2026-01-15,Municipal Corporation Election (Maharashtra),official
+2026-01-26,Republic Day,official
+2026-03-03,Holi,official
+2026-03-26,Shri Ram Navami,official
+2026-03-31,Shri Mahavir Jayanti,official
+2026-04-03,Good Friday,official
+2026-04-14,Dr Baba Saheb Ambedkar Jayanti,official
+2026-05-01,Maharashtra Day,official
+2026-05-28,Bakri Id,official
+2026-06-26,Muharram,official
+2026-09-14,Ganesh Chaturthi,official
+2026-10-02,Mahatma Gandhi Jayanti,official
+2026-10-20,Dussehra,official
+2026-11-10,Diwali-Balipratipada,official
+2026-11-24,Prakash Gurpurb Sri Guru Nanak Dev,official
+2026-12-25,Christmas,official

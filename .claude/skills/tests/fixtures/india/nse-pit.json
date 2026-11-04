@@ -1,0 +1,42 @@
+{
+  "_note": "SYNTHETIC. Not real SEBI filings. Shaped like NSE's corporates-pit JSON.",
+  "data": [
+    {
+      "symbol": "RELIANCE", "company": "Reliance Industries Limited",
+      "acqName": "A Synthetic Promoter", "personCategory": "Promoter",
+      "secAcq": "250000", "secVal": "392500000",
+      "acqMode": "Market Sale", "tdpTransactionType": "Disposal",
+      "befAcqSharesNo": "1250000", "afterAcqSharesNo": "1000000",
+      "acqfromDt": "28-Oct-2026", "date": "30-Oct-2026",
+      "attachment": "https://example.invalid/synthetic/ril-pit.pdf",
+      "dissemDT": "synthetic-ril-1"
+    },
+    {
+      "symbol": "TCS", "company": "Tata Consultancy Services Limited",
+      "acqName": "A Synthetic Director", "personCategory": "Director",
+      "secAcq": "4000", "secVal": "16000000",
+      "acqMode": "ESOP Allotment", "tdpTransactionType": "Acquisition",
+      "befAcqSharesNo": "1000", "afterAcqSharesNo": "5000",
+      "acqfromDt": "29-Oct-2026", "date": "30-Oct-2026",
+      "attachment": "", "dissemDT": "synthetic-tcs-1"
+    },
+    {
+      "symbol": "INFY", "company": "Infosys Limited",
+      "acqName": "A Synthetic Designated Person", "personCategory": "Designated Person",
+      "secAcq": "800", "secVal": "1520000",
+      "acqMode": "Market Purchase", "tdpTransactionType": "Acquisition",
+      "befAcqSharesNo": "0", "afterAcqSharesNo": "800",
+      "acqfromDt": "20-Oct-2026", "date": "30-Oct-2026",
+      "attachment": "", "dissemDT": "synthetic-infy-1"
+    },
+    {
+      "symbol": "SUZLON", "company": "Suzlon Energy Limited",
+      "acqName": "A Synthetic Promoter Group Entity", "personCategory": "Promoter Group",
+      "secAcq": "1200", "secVal": "84000",
+      "acqMode": "Off Market Inter-se Transfer", "tdpTransactionType": "Acquisition",
+      "befAcqSharesNo": "500", "afterAcqSharesNo": "1700",
+      "acqfromDt": "29-Oct-2026", "date": "30-Oct-2026",
+      "attachment": "", "dissemDT": "synthetic-suzlon-1"
+    }
+  ]
+}

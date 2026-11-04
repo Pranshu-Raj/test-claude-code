@@ -1,0 +1,13 @@
+{
+  "_note": "SYNTHETIC. Not real NSE data. Shaped like allIndices.",
+  "data": [
+    {"index": "NIFTY 50", "last": "25120.40", "percentChange": "-0.62", "previousClose": "25277.15"},
+    {"index": "NIFTY BANK", "last": "57210.85", "percentChange": "-1.18", "previousClose": "57894.20"},
+    {"index": "NIFTY IT", "last": "41880.00", "percentChange": "0.74", "previousClose": "41572.10"},
+    {"index": "NIFTY FMCG", "last": "58120.30", "percentChange": "0.21", "previousClose": "58000.40"},
+    {"index": "NIFTY AUTO", "last": "26440.55", "percentChange": "-0.35", "previousClose": "26533.40"},
+    {"index": "NIFTY PHARMA", "last": "22980.10", "percentChange": "1.42", "previousClose": "22658.60"},
+    {"index": "NIFTY METAL", "last": "9980.25", "percentChange": "-1.90", "previousClose": "10173.60"},
+    {"index": "INDIA VIX", "last": "14.82", "percentChange": "8.40", "previousClose": "13.67"}
+  ]
+}
