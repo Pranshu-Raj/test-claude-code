@@ -329,7 +329,8 @@ TICKER = re.compile(r"^[A-Z0-9][A-Z0-9&\-]{0,19}$")
 # what belongs in it is decided when you edit that file, not by name regexes.
 
 
-def build_universe(index=None, sector=None, path=None):
+def build_universe(index=None, sector=None, path=None, intraday_only=True,
+                   exclude_surveillance=False):
     """(kept [(SYM, name)], counts, source) from config/data/nse_universe.csv.
 
     The US version downloaded Nasdaq Trader's two pipe-delimited directories
@@ -341,6 +342,15 @@ def build_universe(index=None, sector=None, path=None):
     counts = {"rows": len(rows)}
     kept = []
     for r in rows:
+        # India: BE and BZ are trade-for-trade, so an intraday order in one is
+        # rejected by the broker. Keeping them out of an intraday watchlist is
+        # the whole point of the series column.
+        if intraday_only and not r.get("intraday", True):
+            counts["trade-for-trade"] = counts.get("trade-for-trade", 0) + 1
+            continue
+        if exclude_surveillance and r.get("surveillance"):
+            counts["under surveillance"] = counts.get("under surveillance", 0) + 1
+            continue
         if index:
             key = str(index).lower().replace(" ", "").replace("-", "")
             if key not in r["indices"]:
@@ -805,7 +815,9 @@ def money(x):
 
 def cmd_universe(a):
     t0 = time.time()
-    kept, counts, source = build_universe(getattr(a, "index", None), getattr(a, "sector", None))
+    kept, counts, source = build_universe(getattr(a, "index", None), getattr(a, "sector", None),
+                                          intraday_only=not getattr(a, "include_delivery_only", False),
+                                          exclude_surveillance=getattr(a, "no_surveillance", False))
     if not kept:
         raise ScanError("no symbols matched%s%s in %s"
                         % (" index %s" % a.index if getattr(a, "index", None) else "",
@@ -819,6 +831,13 @@ def cmd_universe(a):
                 fh.write("%s|%s\n" % (sym, name))
     dropped = {k: v for k, v in counts.items() if k not in ("keep", "rows")}
     warn = mkt.universe_warning()
+    if getattr(a, "sector", None):
+        rows = mkt.load_universe()
+        known = sum(1 for r in rows if r["sector"])
+        if known < len(rows) * 0.75:
+            print("NOTE: the sector column is a guess from the company name and is set for "
+                  "only %d of %d symbols, so --sector misses most large caps. Supply a real "
+                  "classification before relying on it." % (known, len(rows)))
     if a.json:
         print(json.dumps({"source": source, "kept": len(kept), "rows": counts.get("rows", 0),
                           "dropped": dropped, "symbols": [k for k, _ in kept],
@@ -983,6 +1002,10 @@ def main(argv=None):
     p.add_argument("--index", choices=list(mkt.KNOWN_INDICES),
                    help="keep only this index's members (nifty50, nifty500, fno)")
     p.add_argument("--sector", help="keep only this sector, as spelled in the universe file")
+    p.add_argument("--include-delivery-only", action="store_true",
+                   help="keep BE and BZ series too; they cannot be traded intraday")
+    p.add_argument("--no-surveillance", action="store_true",
+                   help="drop anything NSE has GSM-flagged")
     p.add_argument("--no-write", action="store_true")
     p.add_argument("--pause", type=float, default=PAUSE)
     p.add_argument("--json", action="store_true")

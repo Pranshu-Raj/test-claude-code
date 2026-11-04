@@ -156,6 +156,21 @@ def parse_utc(text):
     return dt
 
 
+_SERIES_CACHE = {}
+
+
+def series_of(symbol):
+    """The NSE series for a symbol, from the universe file, or ''."""
+    if not _SERIES_CACHE:
+        try:
+            for r in mkt.load_universe():
+                _SERIES_CACHE[r["symbol"]] = r
+        except (OSError, ValueError):
+            _SERIES_CACHE["__failed__"] = {}
+    row = _SERIES_CACHE.get(mkt.normalise_symbol(symbol))
+    return (row or {}).get("series", "")
+
+
 def trading_day(d):
     """(is_trading_day, reason) from the shared NSE calendar."""
     return mkt.trading_day(d)
@@ -460,6 +475,19 @@ def check(orders, cfg, portfolio=None, prices=None, state=None, today=None, now=
             warns.append("only %d of the 3 legs (entry, stop, target) are present" % len(by_role))
 
         # asset
+        # India: 235 of NSE's cash symbols are trade-for-trade (BE, BZ).
+        # Every trade settles by compulsory delivery, so an MIS order in one
+        # is rejected by the broker. Catch it here, not at the ticket.
+        if sym and product == mkt.PRODUCT_INTRADAY:
+            note = mkt.series_note(series_of(sym))
+            if note:
+                reasons.append("series: %s, %s. Use %s, or pick another symbol."
+                               % (sym, note, mkt.PRODUCT_DELIVERY))
+        if sym:
+            row = _SERIES_CACHE.get(mkt.normalise_symbol(sym)) or {}
+            if row.get("surveillance"):
+                warns.append("%s is under NSE surveillance (%s): extra margin and "
+                             "restrictions may apply" % (sym, row["surveillance"]))
         if sym and FNO.match(sym.replace(" ", "")):
             if not c.get("allow_options"):
                 reasons.append("asset: %s looks like an F&O instrument; derivatives are off "

@@ -106,6 +106,16 @@ class VerifyChecklist(unittest.TestCase):
         for key in ("NSE_PIT", "NSE_FII_DII", "NSE_ANNOUNCE", "FIELD_MAP"):
             self.assertIn(key, text, key)
 
+    def test_the_enumerated_count_is_honest(self):
+        """The doc also states how many values verify_list() names. Count those."""
+        claimed = re.search(r"\*\*(\d+) values\*\*", verify_doc())
+        self.assertIsNotNone(claimed, "the doc should state the enumerated count")
+        self.assertEqual(int(claimed.group(1)), len(mkt.verify_list()))
+        costs = re.search(r"(\d+) of them cost rates", verify_doc())
+        self.assertIsNotNone(costs, "the doc should state how many are cost rates")
+        self.assertEqual(int(costs.group(1)),
+                         sum(1 for row in mkt.verify_list() if row[0] == "costs"))
+
     def test_the_marker_count_is_honest(self):
         """The README and this doc both claim a VERIFY marker count. Count them."""
         found = 0

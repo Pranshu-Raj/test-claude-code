@@ -243,16 +243,27 @@ def load_universe(path=None):
         if not sym:
             continue
         band = (r.get("band_pct") or "").strip()
+        series = (r.get("series") or "").strip().upper()
         out.append({"symbol": sym, "name": (r.get("name") or "").strip(),
                     "sector": (r.get("sector") or "").strip().lower(),
                     "indices": [i for i in (r.get("indices") or "").lower().split("|") if i],
                     "band_pct": float(band) if band else None,
+                    "series": series,
+                    "intraday": (r.get("intraday") or "").strip().lower() == "yes"
+                                if r.get("intraday") else series_allows_intraday(series),
+                    "surveillance": (r.get("surveillance") or "").strip(),
+                    "isin": (r.get("isin") or "").strip(),
                     "confidence": (r.get("confidence") or "estimate").strip()})
     return out
 
 
-def universe_symbols(index=None, sector=None, path=None):
-    """Symbols in an index (nifty50, nifty500, fno) and/or a sector."""
+def universe_symbols(index=None, sector=None, path=None, intraday_only=False,
+                     exclude_surveillance=False):
+    """Symbols in an index (nifty50, nifty500, fno) and/or a sector.
+
+    intraday_only drops the trade-for-trade series, which cannot be traded
+    MIS at all. exclude_surveillance drops anything NSE has GSM-flagged.
+    """
     rows = load_universe(path)
     if index:
         key = str(index).lower().replace(" ", "").replace("-", "")
@@ -260,18 +271,32 @@ def universe_symbols(index=None, sector=None, path=None):
     if sector:
         want = str(sector).lower()
         rows = [r for r in rows if r["sector"] == want]
+    if intraday_only:
+        rows = [r for r in rows if r["intraday"]]
+    if exclude_surveillance:
+        rows = [r for r in rows if not r["surveillance"]]
     return [r["symbol"] for r in rows]
 
 
 def universe_warning(path=None):
-    """A sentence when the shipped universe has not been replaced, else ''."""
+    """A sentence about whatever is still missing from the universe, else ''.
+
+    Two independent things can be wrong: the rows themselves may be guessed,
+    or they may be official while index membership is still absent (NSE's own
+    files do not carry NIFTY constituents).
+    """
     rows = load_universe(path)
-    est = [r for r in rows if r["confidence"] != "verified"]
+    est = [r for r in rows if r["confidence"] not in ("official", "verified")]
     if est:
-        return ("The NSE universe in config/data/nse_universe.csv is a template written "
-                "from memory, not downloaded: %d of %d rows are unverified, and index "
-                "membership changes at every review. Replace it from niftyindices.com "
-                "and NSE before relying on a scan." % (len(est), len(rows)))
+        return ("The NSE universe in config/data/nse_universe.csv is not from NSE: "
+                "%d of %d rows are unverified. Rebuild it with "
+                "config/import_nse.py." % (len(est), len(rows)))
+    have_index = any(i in r["indices"] for r in rows for i in ("nifty50", "nifty500"))
+    if not have_index:
+        return ("The universe is NSE's official list, but NIFTY 50 and NIFTY 500 "
+                "membership is not in NSE's files and is unset, so --index nifty50 "
+                "matches nothing. Supply it from niftyindices.com: "
+                "config/import_nse.py --indices FILE.")
     return ""
 
 
@@ -374,7 +399,9 @@ def round_to_tick(price, mode="nearest"):
 # stop below the lower band cannot be hit.
 # VERIFY: Source: NSE "Price Bands" daily file and BSE equivalent. Securities
 # in the F&O segment have no fixed band but do have a dynamic operating range.
-PRICE_BANDS_PCT = (2.0, 5.0, 10.0, 20.0)
+# NSE's own sec_list.csv carries a 40 band as well as the usual four, so the
+# tuple below is what the exchange publishes, not the textbook set.
+PRICE_BANDS_PCT = (2.0, 5.0, 10.0, 20.0, 40.0)
 FNO_STOCKS_HAVE_NO_BAND = True
 FNO_DYNAMIC_OPERATING_RANGE_PCT = 10.0  # VERIFY: NSE operating-range circular
 
@@ -445,6 +472,32 @@ INTRADAY_SHORT_ALLOWED = True
 OVERNIGHT_SHORT_ALLOWED_CASH = False
 
 # ---------------------------------------------------------------- products
+
+# SERIES, and whether intraday is possible at all.
+# EQ is rolling settlement and can be traded intraday. BE and BZ are
+# TRADE-FOR-TRADE: every trade settles by compulsory delivery, so an MIS
+# order in one is rejected by the broker. 235 of NSE's 2,627 cash symbols sit
+# in that state. The US pack has no equivalent concept.
+# VERIFY: Source: NSE's series definitions and its surveillance circulars.
+INTRADAY_SERIES = ("EQ",)
+TRADE_FOR_TRADE_SERIES = ("BE", "BZ")
+
+
+def series_allows_intraday(series):
+    """Can this series be traded MIS at all?"""
+    return str(series or "").strip().upper() in INTRADAY_SERIES
+
+
+def series_note(series):
+    """Why a series cannot be traded intraday, or ''."""
+    s = str(series or "").strip().upper()
+    if s in TRADE_FOR_TRADE_SERIES:
+        return ("series %s is trade-for-trade: every trade settles by compulsory "
+                "delivery, so an intraday (%s) order is rejected" % (s, PRODUCT_INTRADAY))
+    if s and s not in INTRADAY_SERIES:
+        return "series %s is not a rolling-settlement cash series" % s
+    return ""
+
 
 PRODUCT_INTRADAY = "MIS"
 PRODUCT_DELIVERY = "CNC"

@@ -276,6 +276,54 @@ exchange features additionally need `www.nseindia.com` and
 `api.bseindia.com`. If you are in a sandboxed or proxied environment, those
 hosts must be allowed or every data command fails.
 
+### 3a. The Kite MCP server (optional, and never a data path)
+
+Zerodha hosts an MCP server at `https://mcp.kite.trade/mcp`. It needs no API
+key of your own, and it gives Claude `get_historical_data`, `get_quotes`,
+`get_ltp`, `get_ohlc` and `search_instruments` against your own Kite login.
+`.mcp.json` at the repo root registers it.
+
+It is worth having for two jobs:
+
+1. **Capturing real fixtures.** One historical pull per symbol, written to
+   disk unchanged, replaces a synthetic fixture with real NSE bars.
+2. **Interactive runs when the data hosts are blocked.** The connection is
+   made by the Claude client, not by the skill tools, so an environment that
+   refuses `query2.finance.yahoo.com` does not stop it.
+
+It is **not** a data adapter, and it must not become one. Every trading
+number in this pack is computed by the Python tools from a file on disk. If
+Claude reads bars out of an MCP result and types them into a tool, then the
+model is doing the transcription, `python3 scan.py` stops working without
+Claude in the room, and one mistyped digit becomes a position size. The
+supported pattern is a courier: the MCP payload is written to a file
+verbatim, and the `offline` adapter reads that file.
+
+**The order tools are the hard line.** The hosted endpoint already leaves out
+`place_order`, `modify_order` and `cancel_order`, which is exactly the
+posture this repo wants. If you ever self-host the server, set its
+`EXCLUDED_TOOLS` to cover the GTT tools too, which the upstream example
+omits:
+
+```
+EXCLUDED_TOOLS=place_order,modify_order,cancel_order,place_gtt_order,modify_gtt_order,delete_gtt_order
+```
+
+Without that you are holding a tool that can place a real order with none of
+the three approval gates: no trader-risk PASS for that fingerprint, no typed
+yes, no Allow once card.
+
+**It cannot run unattended.** Auth is a browser `login` per session, not an
+environment variable, so a pre-open scan on a timer still needs the `kite`
+adapter and `KITE_ACCESS_TOKEN`.
+
+**Reaching it.** The MCP host must be reachable from wherever the Claude
+client runs. Verified on 2026-11-04: a cloud session's container is refused
+at `mcp.kite.trade:443` unless that host is added to the environment's
+allowed domains. Adding it as a connector under
+`https://claude.ai/customize/connectors` instead avoids the container's
+egress entirely. Running Claude Code on your own machine needs neither.
+
 ### 4. A broker, only when you want to place orders (optional)
 
 Zerodha Kite Connect is the default. Keys come from environment variables
@@ -305,12 +353,19 @@ templates, and the skills warn until you replace them.
 | --- | --- | --- |
 | `config/data/nse_holidays.csv` | **done for 2026** (NSE's published list). Redo yearly and raise `CALENDAR_YEARS` | yearly |
 | `config/data/nse_special_sessions.csv` | date done for 2026; the WINDOW needs NSE's Muhurat timing circular | yearly |
-| `config/data/nse_universe.csv` | niftyindices.com factsheets, NSE `EQUITY_L.csv`, NSE's daily price-bands file | every index review |
+| `config/data/nse_universe.csv` | **generated**: drop fresh `EQUITY_L.csv` and `sec_list.csv` into `config/data/source/` and run `config/import_nse.py` | whenever NSE updates them |
 | `config/data/rbi_dates.csv` | RBI's MPC schedule | yearly |
 
 The universe file's `band_pct` column is what makes circuit filtering work.
-Leave it blank and the scanner reports that symbol as band-unknown instead of
-pretending it is clear.
+Blank means NSE publishes no fixed band, which for a cash equity means it is
+in the F&O segment and has a dynamic operating range instead; the scanner
+reports those as band-unknown rather than pretending they are clear.
+
+Its `series` column matters just as much. **BE and BZ are trade-for-trade:
+every trade settles by compulsory delivery, so an MIS order in one is
+rejected by your broker.** 235 of NSE's 2,627 cash symbols are in that state.
+The scanner leaves them out of an intraday watchlist and `trader-risk` blocks
+an intraday order in one outright. There is no US equivalent of this.
 
 ### 6. Your own rules (required)
 

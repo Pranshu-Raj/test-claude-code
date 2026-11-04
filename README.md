@@ -71,15 +71,24 @@ in [docs/verify.md](docs/verify.md). At minimum, before real money:
 
 1. ~~`config/data/nse_holidays.csv`~~ **done**: NSE's published 2026 list,
    16 holidays, `CALENDAR_VERIFIED = True`.
-2. `config/data/nse_universe.csv` from niftyindices.com and NSE's
-   `EQUITY_L.csv`, with the price band per symbol.
+2. ~~`config/data/nse_universe.csv`~~ **mostly done**: NSE's own
+   `EQUITY_L.csv` and `sec_list.csv`, 2,627 symbols with real price bands,
+   series and GSM flags. Only NIFTY 50/500 membership is still missing, since
+   NSE's files do not carry it.
 3. Every rate in `COSTS` against your broker's tariff and the current STT,
    stamp duty and GST rates.
 4. `BROKER_SQUARE_OFF` against your own broker's policy. They differ.
 5. The Muhurat window, once NSE issues the timing circular.
 
-Until you do, the skills print a warning saying the universe is unverified,
-and one on the Muhurat date about its window. That is deliberate.
+Until you do, the skills warn that NIFTY membership is unset, and warn on the
+Muhurat date about its window. That is deliberate.
+
+Refreshing the universe later is one command:
+
+```bash
+# drop new EQUITY_L.csv and sec_list.csv into config/data/source/, then
+python3 .claude/skills/config/import_nse.py
+```
 
 ## Setting up a broker
 
@@ -112,7 +121,8 @@ if one fills you must cancel the other yourself. Every ticket says so.
 | Order | one Alpaca bracket | three Kite legs, not linked |
 | Shorting | off by default | intraday allowed, overnight in cash impossible |
 | PDT rule | `pdt_guard` | removed; no such rule in India |
-| Universe | Nasdaq Trader files | a data file you maintain |
+| Universe | Nasdaq Trader files | NSE's `EQUITY_L.csv` + `sec_list.csv`, imported |
+| Trade-for-trade | no concept | BE and BZ series blocked for intraday |
 | Fundamentals | SEC XBRL by CIK | a results table in crore you supply |
 | Congress trades | House Clerk PTRs | SEBI insider disclosures |
 | New | | FII/DII flows, India VIX, sector rotation |
