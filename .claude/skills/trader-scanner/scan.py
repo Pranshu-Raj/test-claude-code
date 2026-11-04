@@ -19,6 +19,7 @@ Setups, all computed here and not by any model:
 
   daily (on daily closes, before the open)
     breakout_20d     closed above its highest close of the last 20 sessions
+    near_high_20d    closed within --near percent UNDER that high, not yet through it
     bull_flag        a strong run, then a shallow pause that holds
     reclaim_ma20     closed under the 20-day average, then back above it
     oversold         RSI 14 (Wilder) under 30
@@ -62,6 +63,7 @@ SLEEP = time.sleep  # tests swap this out
 BAR_MIN = 5
 MAX_CONFIRM = 200   # stage-2 v8 charts per orb scan, most traded first
 MIN_DAILY_BARS = 30
+NEAR_HIGH_PCT = 2.0      # near_high_20d: within this many percent under the 20-day closing high
 DEFAULT_UNIVERSE = "trader/universe.txt"
 NOTE = "A scan is a list of charts that match a rule, not a list of stocks to buy."
 CIRCUIT_NOTE = ("A stock at or near its daily price band cannot run: those are skipped. "
@@ -71,6 +73,7 @@ SETUPS = [
     ("gap_up", "gapped up from the previous close"),
     ("gap_down", "gapped down from the previous close"),
     ("breakout_20d", "20-day closing-high breakout"),
+    ("near_high_20d", "within reach of its 20-day closing high"),
     ("bull_flag", "bull flag"),
     ("reclaim_ma20", "reclaimed the 20-day average"),
     ("oversold", "oversold (RSI under 30)"),
@@ -403,11 +406,23 @@ def daily_closes(series, now_utc):
     return sorted(out.items())
 
 
-def find_setups(closes):
-    """closes (oldest first, >= 30) -> (setup keys, numbers)."""
+def last_daily_volume(series, last_date):
+    """Volume of the complete daily bar dated last_date, or None if the series has none."""
+    vols = series.get("v") or []
+    out = None
+    for ts, v in zip(series["t"], vols):
+        if v is not None and ts_to_ist(ts).date() == last_date:
+            out = int(v)   # a late duplicate (the live tick) wins, as in daily_closes
+    return out
+
+
+def find_setups(closes, near=NEAR_HIGH_PCT):
+    """closes (oldest first, >= 30) -> (setup keys, numbers).
+    near: percent under the 20-day closing high that still counts as near_high_20d."""
     c = closes
     last = c[-1]
     hi20 = max(c[-21:-1])
+    to_high = (hi20 / last - 1.0) * 100.0    # positive = still under the high
     ma20 = sum(c[-20:]) / 20.0
     ma20_prev = sum(c[-21:-1]) / 20.0
     run = c[-6] / c[-16] - 1
@@ -417,6 +432,8 @@ def find_setups(closes):
     tags = []
     if last > hi20:
         tags.append("breakout_20d")
+    elif near is not None and 0.0 <= to_high <= float(near):
+        tags.append("near_high_20d")
     if run > 0.10 and rng5 < 0.05:
         tags.append("bull_flag")
     if c[-2] < ma20_prev and last > ma20:
@@ -426,7 +443,7 @@ def find_setups(closes):
     if r_prev is not None and r_prev < 30 and last > c[-2]:
         tags.append("oversold_bounce")
     return tags, {"rsi": r, "rsi_prev": r_prev, "high20": hi20, "ma20": ma20,
-                  "run_pct": run * 100, "range5_pct": rng5 * 100}
+                  "run_pct": run * 100, "range5_pct": rng5 * 100, "to_high_pct": to_high}
 
 
 def gap_pct(series):
@@ -439,8 +456,10 @@ def gap_pct(series):
     return 100.0 * (float(opens[-1]) / float(prev) - 1.0)
 
 
-def scan_daily(data, symbols, now_utc, min_price, min_volume, bands=None, gap=None):
-    """Pure. data = {SYM: series}. Returns (hits, counts, last_date)."""
+def scan_daily(data, symbols, now_utc, min_price, min_volume, bands=None, gap=None,
+               near=NEAR_HIGH_PCT, only=None):
+    """Pure. data = {SYM: series}. Returns (hits, counts, last_date).
+    only: keep just the charts carrying this setup key."""
     hits, dates = [], {}
     counts = {"requested": len(symbols), "fetched": 0, "illiquid": 0, "short": 0, "scanned": 0,
               "at_circuit": 0, "band_unknown": 0}
@@ -451,11 +470,12 @@ def scan_daily(data, symbols, now_utc, min_price, min_volume, bands=None, gap=No
             continue
         counts["fetched"] += 1
         bars = daily_closes(s, now_utc)
-        meta = s.get("meta") or {}
-        price = meta.get("regularMarketPrice")
-        if price is None and bars:
-            price = bars[-1][1]
-        vol = meta.get("regularMarketVolume")
+        # Price and volume come from the last COMPLETE daily bar. The adapters'
+        # canonical shape carries no quote fields (the US version read Yahoo's
+        # regularMarketPrice / regularMarketVolume from the raw meta), so reading
+        # the meta here would drop every chart as illiquid.
+        price = bars[-1][1] if bars else None
+        vol = last_daily_volume(s, bars[-1][0]) if bars else None
         if price is None or price < min_price or (min_volume > 0 and (vol is None or vol < min_volume)):
             counts["illiquid"] += 1
             continue
@@ -472,16 +492,19 @@ def scan_daily(data, symbols, now_utc, min_price, min_volume, bands=None, gap=No
         d_last = bars[-1][0]
         dates[d_last] = dates.get(d_last, 0) + 1
         closes = [c for _, c in bars]
-        tags, nums = find_setups(closes)
+        tags, nums = find_setups(closes, near)
         g = gap_pct(s)
         if gap and g is not None:
             if g >= float(gap):
                 tags = list(tags) + ["gap_up"]
             elif g <= -float(gap):
                 tags = list(tags) + ["gap_down"]
+        if only and only not in tags:
+            continue
         if tags:
             hits.append({"symbol": sym, "setups": tags, "price": round(closes[-1], 2),
                          "close_date": d_last.isoformat(), "rsi": round(nums["rsi"], 1),
+                         "high20": round(nums["high20"], 2), "to_high_pct": round(nums["to_high_pct"], 2),
                          "volume": int(vol) if vol is not None else None,
                          "gap_pct": round(g, 2) if g is not None else None,
                          "band_pct": bands.get(sym), "circuit": state})
@@ -864,13 +887,15 @@ def cmd_daily(a):
     data, failed = fetch_series(symbols, "1d", a.pause, getattr(a, "adapter", None),
                                 getattr(a, "data", None), a)
     hits, counts, last_date = scan_daily(data, symbols, now, a.min_price, a.min_volume,
-                                        gap=getattr(a, "gap", None))
+                                        gap=getattr(a, "gap", None), near=getattr(a, "near", NEAR_HIGH_PCT),
+                                        only=getattr(a, "setup", None))
     nfailed = len(symbols) - counts["fetched"]
     as_of = ("%s close" % last_date.isoformat()) if last_date else None
     doc = {"created_by": "trader-scanner", "created_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "mode": "daily",
            "as_of": as_of, "universe": len(symbols), "scanned": counts["scanned"], "failed": nfailed,
            "source": getattr(a, "adapter", None) or ds.DEFAULT_ADAPTER,
-           "filters": {"min_price": a.min_price, "min_volume": a.min_volume},
+           "filters": {"min_price": a.min_price, "min_volume": a.min_volume,
+                       "near_pct": getattr(a, "near", NEAR_HIGH_PCT), "setup": getattr(a, "setup", None)},
            "note": NOTE, "hits": hits}
     if getattr(a, "adapter", None):
         doc["adapter"] = a.adapter
@@ -897,8 +922,11 @@ def cmd_daily(a):
     else:
         print("No setups.")
     for h in hits[:a.show]:
-        print("  %-6s %10s  RSI %5.1f  %s" % (h["symbol"], money(h["price"]), h["rsi"],
-                                              ", ".join(LABEL[t] for t in h["setups"])))
+        extra = ""
+        if "near_high_20d" in h["setups"]:
+            extra = " [%.2f%% under the 20-day high of %s]" % (h["to_high_pct"], money(h["high20"]))
+        print("  %-6s %10s  RSI %5.1f  %s%s" % (h["symbol"], money(h["price"]), h["rsi"],
+                                                ", ".join(LABEL[t] for t in h["setups"]), extra))
     if len(hits) > a.show:
         print("  ... and %d more in the watchlist (--show N for more)." % (len(hits) - a.show))
     if counts.get("at_circuit") or counts.get("band_unknown"):
@@ -1032,6 +1060,10 @@ def main(argv=None):
     common(p, 50.0, 100000)
     p.add_argument("--gap", type=float, metavar="PCT",
                    help="also flag a gap up or down of at least PCT from the previous close")
+    p.add_argument("--near", type=float, metavar="PCT", default=NEAR_HIGH_PCT,
+                   help="near_high_20d: within PCT under the 20-day closing high (%.1f)" % NEAR_HIGH_PCT)
+    p.add_argument("--setup", choices=[k for k, _ in SETUPS], metavar="KEY",
+                   help="keep only charts with this setup: " + ", ".join(k for k, _ in SETUPS))
     p = sub.add_parser("orb", help="opening-range breakouts so far today")
     common(p, 50.0, 0)
     p.add_argument("--or-minutes", type=int, default=15)

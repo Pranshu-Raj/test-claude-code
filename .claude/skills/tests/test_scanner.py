@@ -215,6 +215,53 @@ class Orb(unittest.TestCase):
             shutil.rmtree(d)
 
 
+class DailyScan(unittest.TestCase):
+    """SYNTHETIC daily series built in-test: the adapters' canonical shape carries
+    no quote fields, so price and volume must come from the bars themselves."""
+
+    def daily(self, closes, vol=500000):
+        day = datetime.date(2026, 9, 1)
+        bars = []
+        for i, c in enumerate(closes):
+            while day.weekday() >= 5:
+                day += datetime.timedelta(days=1)
+            t = int(datetime.datetime(day.year, day.month, day.day, 15, 30, tzinfo=datetime.timezone(datetime.timedelta(minutes=mkt.IST_OFFSET_MINUTES))).timestamp())
+            bars.append({"t": t, "o": c, "h": c + 1, "l": c - 1, "c": c, "v": vol})
+            day += datetime.timedelta(days=1)
+        return scan.series_from_canonical(ds.canonical("SYNTH", "NSE", "1d", bars, {"prev_close": closes[-2]}))
+
+    def test_a_liquid_chart_is_scanned_not_dropped_as_illiquid(self):
+        s = self.daily([100.0 + i for i in range(35)])
+        now = datetime.datetime(2026, 12, 1, 12, 0, tzinfo=datetime.timezone.utc)
+        hits, counts, _ = scan.scan_daily({"SYNTH": s}, ["SYNTH"], now, 50.0, 100000, bands={})
+        self.assertEqual(counts["illiquid"], 0)
+        self.assertEqual(counts["scanned"], 1)
+        self.assertIn("breakout_20d", [t for h in hits for t in h["setups"]])
+
+    def test_near_the_high_is_the_brink_not_the_breakout(self):
+        closes = [100.0 + i for i in range(34)] + [132.0]      # high of the last 20 is 133, last is 132
+        s = self.daily(closes)
+        now = datetime.datetime(2026, 12, 1, 12, 0, tzinfo=datetime.timezone.utc)
+        hits, counts, _ = scan.scan_daily({"SYNTH": s}, ["SYNTH"], now, 50.0, 100000, bands={})
+        tags = hits[0]["setups"]
+        self.assertIn("near_high_20d", tags)
+        self.assertNotIn("breakout_20d", tags)
+        self.assertAlmostEqual(hits[0]["to_high_pct"], 0.76, places=2)
+        # a tighter --near leaves it out, and --setup keeps only that setup
+        hits, _, _ = scan.scan_daily({"SYNTH": s}, ["SYNTH"], now, 50.0, 100000, bands={}, near=0.5)
+        self.assertNotIn("near_high_20d", hits[0]["setups"] if hits else [])
+        hits, _, _ = scan.scan_daily({"SYNTH": s}, ["SYNTH"], now, 50.0, 100000, bands={},
+                                     only="breakout_20d")
+        self.assertEqual(hits, [])
+
+    def test_thin_volume_is_still_filtered(self):
+        s = self.daily([100.0 + i for i in range(35)], vol=10)
+        now = datetime.datetime(2026, 12, 1, 12, 0, tzinfo=datetime.timezone.utc)
+        hits, counts, _ = scan.scan_daily({"SYNTH": s}, ["SYNTH"], now, 50.0, 100000, bands={})
+        self.assertEqual(counts["illiquid"], 1)
+        self.assertEqual(hits, [])
+
+
 class Gaps(unittest.TestCase):
     def test_gap_pct_is_measured_off_the_previous_close(self):
         s = series("TCS")

@@ -82,6 +82,31 @@ class YahooParsing(unittest.TestCase):
         self.assertEqual(s["meta"]["timezone"], "Asia/Kolkata")
         self.assertEqual(s["meta"]["gmtoffset"], 19800)
 
+    def test_a_daily_chart_takes_the_prior_session_not_the_range_start(self):
+        # SYNTHETIC: Yahoo sends no previousClose on a 1d chart and its
+        # chartPreviousClose is the close before the range began.
+        day = 86400
+        t0 = 1793591100 - 3 * day                      # 09:15 IST, three sessions ago
+        stamps = [t0 + i * day for i in range(4)]
+        closes = [100.0, 101.0, 102.0, 103.0]
+        doc = {"chart": {"result": [{
+            "meta": {"symbol": "SYNTH.NS", "chartPreviousClose": 50.0, "gmtoffset": 19800,
+                     "exchangeTimezoneName": "Asia/Kolkata", "currency": "INR"},
+            "timestamp": stamps,
+            "indicators": {"quote": [{"open": closes, "high": closes, "low": closes,
+                                      "close": closes, "volume": [1, 1, 1, 1]}]}}], "error": None}}
+        s = ds.parse_yahoo_chart(doc, "SYNTH", "1d")
+        self.assertEqual(s["meta"]["prev_close"], 102.0)
+
+    def test_a_single_session_chart_still_falls_back_to_chart_previous_close(self):
+        doc = {"chart": {"result": [{
+            "meta": {"symbol": "SYNTH.NS", "chartPreviousClose": 99.5, "gmtoffset": 19800},
+            "timestamp": [1793591100, 1793591400],
+            "indicators": {"quote": [{"open": [100, 101], "high": [100, 101], "low": [100, 101],
+                                      "close": [100, 101], "volume": [1, 1]}]}}], "error": None}}
+        s = ds.parse_yahoo_chart(doc, "SYNTH", "5m")
+        self.assertEqual(s["meta"]["prev_close"], 99.5)
+
     def test_null_padded_bars_are_dropped_not_zeroed(self):
         import json
         with open(os.path.join(FIX, "yahoo-RELIANCE-5m.json"), encoding="utf-8") as fh:

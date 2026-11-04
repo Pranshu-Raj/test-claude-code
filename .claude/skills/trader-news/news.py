@@ -208,6 +208,10 @@ class Fetcher(object):
             raise NewsError("HTTP %s for %s" % (exc.code, url))
         except urllib.error.URLError as exc:
             raise NewsError("could not reach %s: %s" % (url, exc.reason))
+        except OSError as exc:
+            # A read timeout surfaces as a bare TimeoutError, not a URLError.
+            # NSE in particular accepts the connection and then never answers.
+            raise NewsError("timed out or lost the connection to %s: %s" % (url, exc))
 
 
 # No CIK lookup is needed: NSE and BSE key announcements by the trading

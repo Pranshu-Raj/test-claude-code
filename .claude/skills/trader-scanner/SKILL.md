@@ -30,6 +30,7 @@ charts that match a rule, not a list of stocks to buy. Every number comes from
 python3 "${CLAUDE_SKILL_DIR}/scan.py" universe --index nifty50
 python3 "${CLAUDE_SKILL_DIR}/scan.py" universe --sector auto
 python3 "${CLAUDE_SKILL_DIR}/scan.py" daily --gap 2
+python3 "${CLAUDE_SKILL_DIR}/scan.py" daily --setup near_high_20d --near 1.5
 python3 "${CLAUDE_SKILL_DIR}/scan.py" orb --at 10:15
 python3 "${CLAUDE_SKILL_DIR}/scan.py" orb --symbols TCS,RELIANCE --adapter offline --data DIR
 ```
@@ -69,6 +70,7 @@ so those rows are blank by design.
 | setup | rule |
 | --- | --- |
 | `breakout_20d` | closed above its highest close of the last 20 sessions |
+| `near_high_20d` | closed within `--near` percent (default 2) UNDER that high, not yet through it: the brink, not the breakout. `--setup near_high_20d` keeps only those |
 | `bull_flag` | a strong run, then a shallow pause that holds |
 | `reclaim_ma20` | closed under the 20-day average, then back above it |
 | `oversold` | RSI 14 (Wilder) under 30 |
