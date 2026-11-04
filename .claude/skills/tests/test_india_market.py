@@ -197,9 +197,94 @@ class Bands(unittest.TestCase):
     def test_no_previous_close_does_not_crash_the_filter(self):
         self.assertEqual(mkt.circuit_state(1000.0, None, 10.0), "clear")
 
-    def test_the_four_bands_and_the_market_wide_breakers(self):
-        self.assertEqual(mkt.PRICE_BANDS_PCT, (2.0, 5.0, 10.0, 20.0))
+    def test_the_bands_are_the_ones_nse_publishes(self):
+        """NSE's own sec_list.csv carries a 40 band as well as the usual four,
+        so the tuple is what the exchange publishes, not the textbook set."""
+        self.assertEqual(mkt.PRICE_BANDS_PCT, (2.0, 5.0, 10.0, 20.0, 40.0))
         self.assertEqual(mkt.MARKET_WIDE_BREAKER_PCT, (10.0, 15.0, 20.0))
+
+    def test_every_band_in_the_universe_is_one_the_config_knows(self):
+        seen = {r["band_pct"] for r in mkt.load_universe() if r["band_pct"]}
+        self.assertTrue(seen)
+        for b in sorted(seen):
+            self.assertIn(b, mkt.PRICE_BANDS_PCT, "band %s is in the data but not the config" % b)
+
+
+class Series(unittest.TestCase):
+    """EQ can be traded intraday. BE and BZ settle by compulsory delivery, so
+    an MIS order in one is rejected by the broker. No US equivalent."""
+
+    def test_eq_allows_intraday(self):
+        self.assertTrue(mkt.series_allows_intraday("EQ"))
+        self.assertEqual(mkt.series_note("EQ"), "")
+
+    def test_trade_for_trade_series_do_not(self):
+        for s in ("BE", "BZ"):
+            self.assertFalse(mkt.series_allows_intraday(s), s)
+            note = mkt.series_note(s)
+            self.assertIn("trade-for-trade", note)
+            self.assertIn("compulsory delivery", note)
+            self.assertIn("MIS", note)
+
+    def test_an_unknown_series_is_not_assumed_tradable(self):
+        self.assertFalse(mkt.series_allows_intraday("SM"))
+        self.assertIn("not a rolling-settlement", mkt.series_note("SM"))
+
+    def test_the_universe_carries_the_series_and_the_flag(self):
+        rows = {r["symbol"]: r for r in mkt.load_universe()}
+        eq = [r for r in rows.values() if r["series"] == "EQ"]
+        tft = [r for r in rows.values() if r["series"] in mkt.TRADE_FOR_TRADE_SERIES]
+        self.assertGreater(len(eq), 2000)
+        self.assertGreater(len(tft), 100)
+        self.assertTrue(all(r["intraday"] for r in eq))
+        self.assertFalse(any(r["intraday"] for r in tft))
+
+    def test_filtering_to_intraday_drops_exactly_those(self):
+        all_syms = set(mkt.universe_symbols())
+        intraday = set(mkt.universe_symbols(intraday_only=True))
+        dropped = all_syms - intraday
+        self.assertTrue(dropped)
+        rows = {r["symbol"]: r for r in mkt.load_universe()}
+        for s in dropped:
+            self.assertIn(rows[s]["series"], mkt.TRADE_FOR_TRADE_SERIES, s)
+
+    def test_surveillance_can_be_excluded(self):
+        with_s = set(mkt.universe_symbols(intraday_only=True))
+        without = set(mkt.universe_symbols(intraday_only=True, exclude_surveillance=True))
+        self.assertTrue(with_s - without)
+        rows = {r["symbol"]: r for r in mkt.load_universe()}
+        for s in with_s - without:
+            self.assertTrue(rows[s]["surveillance"], s)
+
+
+class OfficialUniverse(unittest.TestCase):
+    def test_it_is_nses_list_not_a_template(self):
+        rows = mkt.load_universe()
+        self.assertGreater(len(rows), 2000)
+        self.assertEqual(sorted({r["confidence"] for r in rows}), ["official"])
+
+    def test_no_band_means_fno_not_unknown(self):
+        """NSE publishes no fixed band for a security in the F&O segment, so a
+        blank band on a cash equity means dynamic range, and the importer tags
+        it fno."""
+        rows = [r for r in mkt.load_universe() if not r["band_pct"]]
+        self.assertTrue(rows)
+        self.assertTrue(all("fno" in r["indices"] for r in rows))
+
+    def test_most_symbols_do_have_a_band_the_scanner_can_use(self):
+        rows = mkt.load_universe()
+        banded = [r for r in rows if r["band_pct"]]
+        self.assertGreater(len(banded), 2000)
+
+    def test_isins_came_through(self):
+        r = next(x for x in mkt.load_universe() if x["symbol"] == "RELIANCE")
+        self.assertTrue(r["isin"].startswith("INE"))
+
+    def test_the_warning_now_only_names_the_missing_index_membership(self):
+        w = mkt.universe_warning()
+        self.assertIn("NIFTY", w)
+        self.assertIn("niftyindices.com", w)
+        self.assertNotIn("written from memory", w)
 
 
 class Symbols(unittest.TestCase):

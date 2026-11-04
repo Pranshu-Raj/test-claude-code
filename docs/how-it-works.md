@@ -305,12 +305,19 @@ templates, and the skills warn until you replace them.
 | --- | --- | --- |
 | `config/data/nse_holidays.csv` | **done for 2026** (NSE's published list). Redo yearly and raise `CALENDAR_YEARS` | yearly |
 | `config/data/nse_special_sessions.csv` | date done for 2026; the WINDOW needs NSE's Muhurat timing circular | yearly |
-| `config/data/nse_universe.csv` | niftyindices.com factsheets, NSE `EQUITY_L.csv`, NSE's daily price-bands file | every index review |
+| `config/data/nse_universe.csv` | **generated**: drop fresh `EQUITY_L.csv` and `sec_list.csv` into `config/data/source/` and run `config/import_nse.py` | whenever NSE updates them |
 | `config/data/rbi_dates.csv` | RBI's MPC schedule | yearly |
 
 The universe file's `band_pct` column is what makes circuit filtering work.
-Leave it blank and the scanner reports that symbol as band-unknown instead of
-pretending it is clear.
+Blank means NSE publishes no fixed band, which for a cash equity means it is
+in the F&O segment and has a dynamic operating range instead; the scanner
+reports those as band-unknown rather than pretending they are clear.
+
+Its `series` column matters just as much. **BE and BZ are trade-for-trade:
+every trade settles by compulsory delivery, so an MIS order in one is
+rejected by your broker.** 235 of NSE's 2,627 cash symbols are in that state.
+The scanner leaves them out of an intraday watchlist and `trader-risk` blocks
+an intraday order in one outright. There is no US equivalent of this.
 
 ### 6. Your own rules (required)
 

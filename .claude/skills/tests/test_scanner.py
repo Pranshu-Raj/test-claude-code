@@ -38,19 +38,56 @@ class Universe(unittest.TestCase):
     def test_it_comes_from_the_data_file_not_a_symbol_directory(self):
         kept, counts, source = scan.build_universe()
         self.assertTrue(source.endswith("nse_universe.csv"))
-        self.assertGreater(len(kept), 40)
-        self.assertIn(("TCS", "Tata Consultancy Services"), kept)
+        self.assertGreater(len(kept), 2000)          # NSE's real cash list
+        self.assertIn("TCS", [k for k, _ in kept])
 
-    def test_an_index_filter(self):
-        kept, counts, _ = scan.build_universe(index="nifty50")
-        self.assertEqual(len(kept), 50)
-        self.assertTrue(counts["not in nifty50"] > 0)
+    def test_the_derived_fno_index_filter_works(self):
+        kept, counts, _ = scan.build_universe(index="fno")
+        self.assertGreater(len(kept), 100)
+        self.assertIn("RELIANCE", [k for k, _ in kept])
+        self.assertTrue(counts["not in fno"] > 0)
+
+    def test_nifty_membership_is_absent_and_says_so(self):
+        """NSE's own files carry no NIFTY constituents, so the filter matches
+        nothing and the warning names the source that would fix it."""
+        kept, _, _ = scan.build_universe(index="nifty50")
+        self.assertEqual(kept, [])
+        self.assertIn("niftyindices.com", mkt.universe_warning())
+
+    def test_trade_for_trade_symbols_are_left_out_by_default(self):
+        kept, counts, _ = scan.build_universe()
+        self.assertGreater(counts["trade-for-trade"], 100)
+        rows = {r["symbol"]: r for r in mkt.load_universe()}
+        for sym, _ in kept:
+            self.assertNotIn(rows[sym]["series"], mkt.TRADE_FOR_TRADE_SERIES, sym)
+
+    def test_they_can_be_kept_deliberately(self):
+        kept, _, _ = scan.build_universe(intraday_only=False)
+        rows = {r["symbol"]: r for r in mkt.load_universe()}
+        self.assertTrue(any(rows[s]["series"] in mkt.TRADE_FOR_TRADE_SERIES for s, _ in kept))
+
+    def test_surveillance_names_can_be_dropped(self):
+        plain, _, _ = scan.build_universe()
+        clean, counts, _ = scan.build_universe(exclude_surveillance=True)
+        self.assertLess(len(clean), len(plain))
+        self.assertGreater(counts["under surveillance"], 0)
 
     def test_a_sector_filter(self):
-        kept, _, _ = scan.build_universe(sector="auto")
+        kept, _, _ = scan.build_universe(sector="financials")
         syms = [k for k, _ in kept]
-        self.assertIn("MARUTI", syms)
-        self.assertNotIn("TCS", syms)
+        self.assertIn("HDFCBANK", syms)          # the name says "Bank"
+        self.assertNotIn("RELIANCE", syms)
+
+    def test_the_sector_guess_is_sparse_and_the_cli_admits_it(self):
+        """It is derived from the company name, so it misses most large caps:
+        "Tata Consultancy Services Limited" contains no sector word. Better to
+        say that than to let --sector quietly return a third of the market."""
+        rows = mkt.load_universe()
+        known = sum(1 for r in rows if r["sector"])
+        self.assertLess(known, len(rows) * 0.75)
+        self.assertEqual(next(r for r in rows if r["symbol"] == "TCS")["sector"], "")
+        code, text, _ = run("universe", "--sector", "financials", "--no-write")
+        self.assertIn("the sector column is a guess", text)
 
     def test_nse_symbols_with_punctuation_survive(self):
         syms = [k for k, _ in scan.build_universe()[0]]
@@ -59,25 +96,31 @@ class Universe(unittest.TestCase):
         for s in syms:
             self.assertRegex(s, scan.TICKER.pattern)
 
-    def test_bands_are_only_known_where_filled_in(self):
+    def test_bands_come_from_nses_own_file(self):
         bands = scan.bands_by_symbol()
-        self.assertIn("SUZLON", bands)
-        self.assertEqual(bands["SUZLON"], 10.0)
-        self.assertNotIn("TCS", bands)       # an F&O name has no fixed band
+        self.assertGreater(len(bands), 2000)
+        # an F&O name has no fixed band, only a dynamic operating range
+        self.assertNotIn("TCS", bands)
+        self.assertNotIn("RELIANCE", bands)
+        for b in set(bands.values()):
+            self.assertIn(b, mkt.PRICE_BANDS_PCT)
 
-    def test_the_shipped_universe_declares_itself_unverified(self):
-        self.assertIn("not downloaded", mkt.universe_warning())
+    def test_the_universe_is_official_and_only_indices_are_missing(self):
+        rows = mkt.load_universe()
+        self.assertEqual(sorted({r["confidence"] for r in rows}), ["official"])
+        self.assertIn("NIFTY", mkt.universe_warning())
 
     def test_the_cli_writes_a_universe_file_and_warns(self):
         d = tempfile.mkdtemp()
         try:
             out = os.path.join(d, "universe.txt")
-            code, text, err = run("universe", "--index", "nifty50", "--out", out)
+            code, text, err = run("universe", "--out", out)
             self.assertEqual(code, 0, err)
-            self.assertIn("kept 50", text)
+            self.assertIn("kept 2392", text)
+            self.assertIn("trade-for-trade", text)
             self.assertIn("WARNING", text)
             with open(out) as fh:
-                self.assertEqual(len(fh.read().strip().splitlines()), 50)
+                self.assertEqual(len(fh.read().strip().splitlines()), 2392)
         finally:
             shutil.rmtree(d)
 
