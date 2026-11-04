@@ -166,6 +166,19 @@ YAHOO_RANGE = {"1m": "5d", "5m": "60d", "15m": "60d", "1d": "1y"}
 USER_AGENT = "trader-skills/india (+https://github.com/Jakeschincariol/day-trader-skill)"
 
 
+def _prior_session_close(bars, gmtoffset):
+    """Close of the last bar dated before the final bar's date, in exchange time,
+    or None when every bar falls on one day."""
+    if len(bars) < 2:
+        return None
+    off = int(gmtoffset or 0)
+    last_day = (int(bars[-1]["t"]) + off) // 86400
+    for b in reversed(bars[:-1]):
+        if (int(b["t"]) + off) // 86400 < last_day:
+            return b["c"]
+    return None
+
+
 def parse_yahoo_chart(payload, symbol=None, interval="5m"):
     """A Yahoo v8 chart payload -> the canonical shape."""
     try:
@@ -186,7 +199,14 @@ def parse_yahoo_chart(payload, symbol=None, interval="5m"):
         bars.append({"t": t, "o": o[0], "h": h[0], "l": l[0], "c": c[0],
                      "v": (v[0] if v and v[0] is not None else 0)})
     sym = symbol or meta.get("symbol") or ""
-    keep = {"prev_close": meta.get("previousClose") or meta.get("chartPreviousClose"),
+    # previousClose is the prior session's close and is the right base for a gap
+    # or a price band, but Yahoo omits it on daily charts. chartPreviousClose is
+    # the close before the FIRST bar of the range, so on a 1y daily or 60d 5m
+    # chart it is months old; derive the prior session from the bars instead and
+    # only fall back to chartPreviousClose when the range holds a single session.
+    keep = {"prev_close": (meta.get("previousClose")
+                           or _prior_session_close(bars, meta.get("gmtoffset"))
+                           or meta.get("chartPreviousClose")),
             "currency": meta.get("currency"), "exchange_name": meta.get("exchangeName"),
             "timezone": meta.get("exchangeTimezoneName"), "gmtoffset": meta.get("gmtoffset"),
             "source": "yahoo"}
