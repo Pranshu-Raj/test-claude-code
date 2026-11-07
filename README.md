@@ -151,29 +151,46 @@ reports then say the figure is gross and name the real loss.
 cd .claude/skills && python3 -m unittest discover -s tests
 ```
 
-395 tests, all offline on saved fixtures, so they pass with no network.
+451 tests, all offline on saved fixtures, so they pass with no network.
 
-**The India fixtures are SYNTHETIC.** They are shaped exactly like NSE data
+**The India fixtures are SYNTHETIC, plus a folder of real captures.**
+`tests/fixtures/india/real/` holds real Yahoo payloads from 2026-11-07 and the
+tests run on them too; that folder is what showed a real NSE session has 72 to
+74 five-minute bars, not 75. The synthetic ones are shaped exactly like NSE data
 (IST timestamps, 75 bars a session, 0.05 tick, real payload layouts) so the
 arithmetic is genuinely tested, but no price in them ever traded. Every file
 carries `"synthetic": true` and a test asserts that marker.
 `tests/fixtures/india/README.md` explains how to drop in a real capture.
 
-## What has not been verified live
+## What has been verified live, and what has not
 
-The environment this port was written in blocks every market-data host, so:
+Until 2026-11-07 this port was written in an environment that blocked every
+market-data host. That day the hosts were allowed and the live paths were
+exercised for the first time:
 
-- The **four broker adapters** (Kite, Upstox, Angel One, Dhan) build their
-  requests from each vendor's published API but have never touched a live
-  endpoint.
-- The **NSE and BSE endpoints** in `trader-news`, `trader-insider` and
-  `trader-analyst` follow the published JSON but have not been called. NSE
-  needs a browser user agent and a primed cookie and rate-limits hard.
-- The **Yahoo adapter's** `.NS` payload shape is assumed to match the US one.
+- **Yahoo `.NS` data: verified.** Real RELIANCE, TCS, HDFCBANK, NIFTY 50 and
+  India VIX payloads parse through the adapter unchanged. The feed returns the
+  full 75-slot grid but the **15:20 bar is null on every session** (15:15 and
+  15:25 often), so a session has 72 to 74 bars, never 75. The old "75 bars or
+  nothing" rule found zero real sessions and the time machine had no history;
+  it now requires every bar up to the 15:15 flat-by and tolerates the tail.
+  Real captures live in `tests/fixtures/india/real/` and the tests run on them.
+- **Kite MCP: reachable.** Handshake and `tools/list` succeed. The hosted
+  server exposes `place_order` and five other order-mutating tools, so
+  `.claude/settings.json` denies them by name.
+- **BSE API: answered 403 Access Denied** to a plain client. The BSE
+  endpoints in `trader-news` and `trader-insider` are unlikely to work without
+  a browser session, and should be treated as dead until shown otherwise.
+- **NSE API: has not been verified.** It needs a primed cookie and a browser user agent,
+  which is how `trader-insider` is written. That approach is fragile by design
+  and may not be welcome by NSE; the robust route for anything that matters is
+  your broker's API.
+- **The four broker data adapters are stubs.** `bars()` and `quote()` raise
+  "not wired up yet". They hold credentials correctly and nothing else. The
+  only live price feed today is Yahoo.
 
-The offline paths, all the arithmetic and all the parsing are tested. Treat
-the live paths as scaffolding to confirm with your own key before relying on
-them. Each skill says this in its own docs and at runtime.
+The offline paths, all the arithmetic and all the parsing are tested. Each
+skill says this in its own docs and at runtime.
 
 ## F&O
 

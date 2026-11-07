@@ -430,25 +430,38 @@ membership changes at review.
 
 ---
 
-## 8. What has not been verified live
+## 8. What has been verified live, and what has not
 
-The environment this port was written in blocks every market-data host, so:
+Until 2026-11-07 this port was written in an environment that blocked every
+market-data host. That day the hosts were allowed and the live paths ran for
+the first time. The results, in order of consequence:
 
-- The **four broker adapters** build their requests from each vendor's
-  published API but have **never touched a live endpoint**.
-- The **NSE and BSE endpoints** in `trader-news`, `trader-insider` and
-  `trader-analyst` follow the published JSON but have not been called. NSE
-  needs a browser user agent and a primed cookie and rate-limits hard.
-- The **Yahoo adapter's** `.NS` payload shape is assumed to match the US one.
+- **Yahoo's `.NS` feed parses, and it never has 75 bars.** It returns the full
+  75-slot grid with the **15:20 bar null on every session** (15:15 and 15:25
+  often). Real sessions have 72 to 74 bars. The time machine's "75 bars or
+  nothing" rule therefore found zero real sessions and had no history to
+  replay; it only ever worked on the synthetic fixtures. A session is now
+  complete when every bar up to the flat-by time is present
+  (`SESSION_REQUIRED_UNTIL`, 72 bars at 5m), and the replay ends at the plan's
+  flat-by rather than the session close. On a real 60-day RELIANCE capture
+  that keeps 59 sessions and drops one with a mid-day gap.
+- **The hosted Kite MCP server ships order tools**, contrary to its README.
+  Section 3a covers the deny list.
+- **BSE's API returned 403 Access Denied** to a plain client, so the BSE
+  endpoints in `trader-news` and `trader-insider` should be treated as dead
+  until shown otherwise.
+- **NSE's API was not tested.** It needs a primed cookie and a browser user
+  agent, which is how `trader-insider` is written. That approach is fragile
+  and may not be welcome by NSE. Anything that matters should come from your
+  broker's API instead.
+- **The four broker data adapters are stubs**: `bars()` and `quote()` raise
+  "not wired up yet". The only live price feed today is Yahoo, which is
+  unofficial and delayed.
 
-All the arithmetic, all the parsing and every offline path **are** tested.
-Treat the live paths as scaffolding to confirm with your own key first. Each
-skill says so in its own docs and at runtime.
-
-The test fixtures under `tests/fixtures/india/` are **synthetic**. They are
-shaped exactly like NSE data so the arithmetic is genuinely exercised, but no
-price in them ever traded. Every file carries `"synthetic": true` and a test
-asserts that marker.
+The test fixtures under `tests/fixtures/india/` are **synthetic** and every
+file says so. The ones under `tests/fixtures/india/real/` are real Yahoo
+captures from 2026-11-07, kept so the tests prove the tools survive real
+data; their README records what each capture showed.
 
 ---
 

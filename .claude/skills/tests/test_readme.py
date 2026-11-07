@@ -72,6 +72,15 @@ class Readme(unittest.TestCase):
         self.assertIn("not been verified", low)
         self.assertIn("synthetic", low)
 
+    def test_the_test_count_is_honest(self):
+        """The README states how many tests there are. Count them."""
+        claimed = re.search(r"(\d+) tests, all offline", readme())
+        self.assertIsNotNone(claimed, "the README should state the test count")
+        tests_dir = os.path.join(ROOT, "tests")
+        suite = unittest.defaultTestLoader.discover(tests_dir, top_level_dir=tests_dir)
+        self.assertEqual(int(claimed.group(1)), suite.countTestCases(),
+                         "the README claims %s tests, there are %d" % (claimed.group(1), suite.countTestCases()))
+
     def test_it_points_at_the_verification_checklist(self):
         self.assertIn("docs/verify.md", readme())
 

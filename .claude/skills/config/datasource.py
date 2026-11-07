@@ -87,24 +87,38 @@ def session_bars(series, day=None, upto=None):
 
 
 def full_sessions(series, interval_minutes=5, before=None):
-    """Complete sessions only, oldest first: days with the full bar count.
+    """Complete sessions only, oldest first, each as its bars in slot order.
 
-    A partial day (a half-session, a data gap, today so far) would bias any
-    replay, so the time machine drops it. For NSE at 5m that count is 75.
+    Complete means every bar from the open up to mkt.SESSION_REQUIRED_UNTIL
+    (the flat-by time) is present on the interval grid. Bars after it may be
+    missing: Yahoo's NSE feed drops the 15:20 bar on every session, so a rule
+    demanding all 75 would keep nothing real. A mid-day gap, a half session
+    or today so far is still dropped. The returned list is the contiguous run
+    of bars from the open, so a bar after a tail gap is left out too.
     """
-    want = mkt.bars_per_session(interval_minutes)
+    step = int(interval_minutes)
+    need = mkt.required_bars(step)
+    open_min = mkt.SESSION_OPEN.hour * 60 + mkt.SESSION_OPEN.minute
     bars = series["bars"] if isinstance(series, dict) else series
     by_day = {}
     for b in bars:
         ist = mkt.ts_to_ist(b["t"])
-        if mkt.SESSION_OPEN <= ist.time() < mkt.SESSION_CLOSE:
-            by_day.setdefault(ist.date(), []).append(b)
+        if not (mkt.SESSION_OPEN <= ist.time() < mkt.SESSION_CLOSE):
+            continue
+        mins = ist.hour * 60 + ist.minute - open_min
+        if mins % step:
+            continue                                  # off the grid: a live tick
+        by_day.setdefault(ist.date(), {})[mins // step] = b
     days = []
     for d in sorted(by_day):
         if before is not None and d >= before:
             continue
-        if len(by_day[d]) == want:
-            days.append((d, by_day[d]))
+        slots = by_day[d]
+        n = 0
+        while n in slots:
+            n += 1
+        if n >= need:
+            days.append((d, [slots[i] for i in range(n)]))
     return days
 
 

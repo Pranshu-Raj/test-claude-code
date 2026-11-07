@@ -26,7 +26,12 @@
 - Tests: `cd .claude/skills && python3 -m unittest discover -s tests`. They
   run entirely offline. The India fixtures under
   `tests/fixtures/india/` are SYNTHETIC and every file says so; a test
-  asserts that marker, so never relabel one as real data.
+  asserts that marker, so never relabel one as real data. The ones under
+  `tests/fixtures/india/real/` ARE real Yahoo captures (2026-11-07) and carry
+  no synthetic marker; their README records what each showed. Real NSE
+  sessions on Yahoo have 72 to 74 five-minute bars, never 75, so a session is
+  complete when every bar up to `SESSION_REQUIRED_UNTIL` (15:15) is present.
+  Never reintroduce a "75 bars or nothing" rule.
 - Paper trading only. Nothing here may place a real order. An order needs all
   three gates: a trader-risk PASS for that exact order today, the user's typed
   yes for that one order, and Claude's own Allow once card.

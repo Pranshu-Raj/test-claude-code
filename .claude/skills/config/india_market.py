@@ -101,6 +101,21 @@ BROKER_SQUARE_OFF = datetime.time(15, 20)
 # The skills aim to be flat with a margin of safety before the broker acts.
 FLAT_BY = datetime.time(15, 15)
 
+# A session counts as COMPLETE when every bar from the open up to this time is
+# present; bars after it may be missing. The skills are flat by FLAT_BY, so a
+# replay never needs the tail. This matters because Yahoo's NSE feed returns
+# the 15:20 bar (often 15:15 and 15:25 too) as null on EVERY session: measured
+# on 60 sessions of RELIANCE.NS on 2026-11-07, 72 to 74 non-null bars a day,
+# never 75. A rule demanding all 75 bars finds zero real sessions.
+SESSION_REQUIRED_UNTIL = FLAT_BY
+
+
+def required_bars(interval_minutes):
+    """Bars a session must have, open up to SESSION_REQUIRED_UNTIL: 72 at 5m, 360 at 1m."""
+    end = SESSION_REQUIRED_UNTIL.hour * 60 + SESSION_REQUIRED_UNTIL.minute
+    start = SESSION_OPEN.hour * 60 + SESSION_OPEN.minute
+    return (end - start) // int(interval_minutes)
+
 # No new intraday entries outside this window. The late bound keeps a trade
 # from being opened with no room to work before square-off.
 NO_ENTRIES_BEFORE = datetime.time(9, 20)   # let the opening auction settle

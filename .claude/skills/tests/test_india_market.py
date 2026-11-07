@@ -47,6 +47,13 @@ class Session(unittest.TestCase):
         self.assertEqual(mkt.bars_per_session(1), 375)
         self.assertEqual(mkt.bars_per_session(15), 25)
 
+    def test_a_session_is_complete_up_to_the_flat_by_not_the_close(self):
+        # Yahoo's NSE feed has the 15:20 bar null on every session: 72 to 74 bars, never 75
+        self.assertEqual(mkt.SESSION_REQUIRED_UNTIL, mkt.FLAT_BY)
+        self.assertEqual(mkt.required_bars(5), 72)
+        self.assertEqual(mkt.required_bars(1), 360)
+        self.assertLess(mkt.required_bars(5), mkt.bars_per_session(5))
+
     def test_minutes_from_open(self):
         self.assertEqual(mkt.minutes_from_open(datetime.time(9, 15)), 0)
         self.assertEqual(mkt.minutes_from_open(datetime.time(15, 30)), 375)

@@ -107,9 +107,16 @@ class Replay(unittest.TestCase):
         self.assertGreater(h["triggered"], 0)
         self.assertEqual(h["target"] + h["stop"] + h["close"], h["triggered"])
 
-    def test_the_replay_ends_at_the_session_close_not_1600(self):
+    def test_the_replay_ends_at_the_plans_flat_by_not_1600(self):
         doc = run_tm()
-        self.assertIn("15:30", json.dumps(doc["mc"]))
+        self.assertEqual(doc["mc"]["until"], "15:15")          # PLAN["flat_by"]
+        self.assertNotIn("16:00", json.dumps(doc["mc"]))
+
+    def test_until_can_still_run_to_the_session_close(self):
+        doc = tm.time_machine(series(), tm.normalize_plan(dict(PLAN)), tm.parse_now(NOW),
+                              200, 19, 2, "15:30", "offline", CFG)
+        self.assertEqual(doc["mc"]["until"], "15:30")
+        self.assertGreater(doc["mc"]["bars_left"], run_tm(replays=200)["mc"]["bars_left"])
 
 
 class Charges(unittest.TestCase):
@@ -148,7 +155,8 @@ class Charges(unittest.TestCase):
 class Output(unittest.TestCase):
     def test_the_report_is_ist_and_rupees(self):
         text = "\n".join(tm.report(run_tm()))
-        self.assertIn("15:30", text)
+        self.assertIn("15:15", text)                 # the plan's flat_by, where a replay ends
+        self.assertNotIn("16:00", text)
         self.assertIn("₹", text)
         self.assertNotIn("$", text)
         self.assertNotIn(" ET", text)
@@ -203,3 +211,71 @@ class SkillDoc(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RealData(unittest.TestCase):
+    """The real RELIANCE capture (tests/fixtures/india/real/README.md). These
+    sessions have 72 to 74 bars, never 75: the rule that demanded 75 found
+    none of them, and the time machine had no history on any real symbol."""
+
+    REAL = os.path.join(INDIA_FIX, "real")
+    NOW_REAL = "2026-11-06 16:00"
+
+    def real(self):
+        return ds.get_adapter("offline", directory=self.REAL).bars("RELIANCE", "5m")
+
+    def real_plan(self):
+        # the first bar after the 15-minute range to close above it, on the last real day
+        meta, bars, _ = tm.parse_bars(self.real(), tm.parse_now(self.NOW_REAL))
+        D = tm.split_sessions(bars)["2026-11-06"]
+        oh = max(D[i]["h"] for i in range(3)); ol = min(D[i]["l"] for i in range(3))
+        k = next(i for i in range(3, 21) if D[i]["c"] > oh)
+        e = round(D[k]["c"], 2); stop = mkt.round_to_tick((oh + ol) / 2, "down")
+        return {"created_by": "trader-exit", "symbol": "RELIANCE", "side": "buy", "date": "2026-11-06",
+                "setup": "orb", "entry": e, "entry_time": tm.clock24(tm.OPEN_MIN + 5 * (k + 1)),
+                "entry_bar": k, "interval": "5m", "opening_range": {"high": oh, "low": ol, "minutes": 15},
+                "stop": stop, "stop_rule": "or_mid", "target": mkt.round_to_tick(e + 2 * (e - stop), "up"),
+                "target_r": 2.0, "risk_per_share": round(e - stop, 2), "reward_risk": 2.0,
+                "flat_by": "15:15", "exchange": "NSE", "product": "MIS"}
+
+    def test_the_capture_is_real_and_says_so(self):
+        s = self.real()
+        self.assertFalse(s["meta"].get("synthetic"))
+        self.assertEqual(len(s["bars"]), 4391)                 # 4,500 grid slots, 109 null
+
+    def test_real_sessions_are_72_to_74_bars_and_are_kept(self):
+        meta, bars, _ = tm.parse_bars(self.real(), tm.parse_now(self.NOW_REAL))
+        full, short = tm.full_sessions(tm.split_sessions(bars), "2026-11-06")
+        self.assertEqual(len(full), 58)                        # 59 before the 6th, minus the gap day
+        self.assertEqual([x["date"] for x in short], ["2026-10-15"])   # missing 11:45 and 11:50
+        lengths = set(len(D) for _, D in full)
+        self.assertTrue(lengths <= {72, 73, 74}, lengths)
+        self.assertNotIn(75, lengths)
+
+    def test_the_pool_has_every_slot_even_the_null_tail(self):
+        meta, bars, _ = tm.parse_bars(self.real(), tm.parse_now(self.NOW_REAL))
+        full, _ = tm.full_sessions(tm.split_sessions(bars), "2026-11-06")
+        pool = tm.build_pool(full)
+        for i in range(1, tm.SESSION_BARS):
+            self.assertTrue(pool[i], "slot %d is empty" % i)
+        self.assertIs(pool[73], pool[72])                      # 15:20 borrows 15:15
+
+    def test_the_time_machine_runs_on_a_real_breakout(self):
+        plan = tm.normalize_plan(self.real_plan())
+        self.assertEqual(plan["entry_bar"], 6)                 # the 09:45 bar, closing 09:50
+        doc = tm.time_machine(self.real(), plan, tm.parse_now(self.NOW_REAL), 1000, 19, 2, None,
+                              "offline", CFG)
+        m, h = doc["mc"], doc["history"]
+        self.assertEqual(m["until"], "15:15")
+        self.assertEqual(m["pool_sessions"], 58)
+        self.assertAlmostEqual(m["p_target"] + m["p_stop"] + m["p_neither"], 1.0, places=6)
+        self.assertEqual(h["sessions"], 58)
+        self.assertEqual(h["triggered"], 28)
+        self.assertEqual(h["target"] + h["stop"] + h["close"], 28)
+
+    def test_until_past_the_null_tail_does_not_crash(self):
+        plan = tm.normalize_plan(self.real_plan())
+        doc = tm.time_machine(self.real(), plan, tm.parse_now(self.NOW_REAL), 200, 19, 2, "15:30",
+                              "offline", CFG)
+        self.assertEqual(doc["mc"]["until"], "15:30")
+        self.assertGreater(doc["history"]["triggered"], 0)

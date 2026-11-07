@@ -9,9 +9,11 @@ It never places an order.
 
 What it does, in order:
 
-  1. Fetch 60 days of 5-minute bars through the data adapter. Keep only FULL
-     sessions before the plan's date: 75 bars each (09:15 to 15:30 at 5
-     minutes), so a half day or a gap cannot bias the result.
+  1. Fetch 60 days of 5-minute bars through the data adapter. Keep only
+     COMPLETE sessions before the plan's date: every bar from 09:15 up to the
+     15:15 flat-by (72 of the 75), so a half day or a gap cannot bias the
+     result. The tail may be missing: Yahoo's NSE feed returns the 15:20 bar
+     as null on every single session.
   2. Build a pool of per-slot moves from those sessions, so a 10:05 bar is
      drawn from what this stock has actually done at 10:05.
   3. Replay the rest of today 10,000 times from the entry bar, and see which
@@ -57,6 +59,8 @@ from config import costs as inr_costs, datasource as ds, india_market as mkt
 
 INTERVAL = 300       # 5-minute bars, in seconds
 SESSION_BARS = mkt.bars_per_session(5)          # 75: 09:15 to 15:30 at 5 minutes
+REQUIRED_BARS = mkt.required_bars(5)            # 72: 09:15 up to the 15:15 flat-by
+FLAT_MIN = mkt.FLAT_BY.hour * 60 + mkt.FLAT_BY.minute
 OPEN_MIN = mkt.SESSION_OPEN.hour * 60 + mkt.SESSION_OPEN.minute
 CLOSE_MIN = mkt.SESSION_CLOSE.hour * 60 + mkt.SESSION_CLOSE.minute
 MIN_SESSIONS = 20
@@ -71,7 +75,8 @@ EPOCH = datetime.datetime(1970, 1, 1)
 WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 # India has no regular early close. A Muhurat session is a separate window on
 # a day that is otherwise shut, and it is not a day-trading session, so the
-# replay simply never sees one: full_sessions() keeps only 75-bar days.
+# replay simply never sees one: full_sessions() keeps days complete up to the
+# flat-by time (72 bars), because Yahoo returns the 15:20 bar as null every day.
 SPECIAL_SESSIONS = mkt.load_special_sessions()
 
 
@@ -113,7 +118,7 @@ def parse_clock(text, what):
     """'10:15 AM', '10:15am', '15:55' or '3:55' (a bare 1 to 8 o'clock means p.m.) -> minutes after midnight."""
     m = re.match(r"^\s*(\d{1,2}):(\d{2})\s*(?:([AaPp])\.?\s*[Mm]\.?)?\s*$", str(text or ""))
     if not m:
-        raise TMError("%s wants a New York time like 10:15 AM or 15:55, not %r" % (what, text))
+        raise TMError("%s wants an IST time like 10:15 or 15:10, not %r" % (what, text))
     h, mi, ap = int(m.group(1)), int(m.group(2)), (m.group(3) or "").lower()
     if mi > 59 or h > 23 or (ap and not 1 <= h <= 12):
         raise TMError("%s %r is not a clock time" % (what, text))
@@ -197,15 +202,23 @@ def split_sessions(bars):
 
 
 def full_sessions(days, before):
-    """Full sessions (all SESSION_BARS of them) strictly before the plan's date, oldest first,
-    and the short ones that were left out (half days, gaps)."""
+    """Complete sessions strictly before the plan's date, oldest first, and the
+    short ones left out (half days, gaps, today so far).
+
+    Complete means every slot from the open up to the flat-by time is present
+    (REQUIRED_BARS, 72). Yahoo's NSE feed returns the 15:20 bar as null on
+    every session, so demanding all 75 kept nothing real. Each session is the
+    contiguous run of bars from the open, so it may be 72 to 75 long."""
     full, short = [], []
     for d in sorted(days):
         if d >= before:
             continue
         s = days[d]
-        if len(s) == SESSION_BARS:
-            full.append((d, [s[i] for i in range(SESSION_BARS)]))
+        n = 0
+        while n in s:
+            n += 1
+        if n >= REQUIRED_BARS:
+            full.append((d, [s[i] for i in range(n)]))
         else:
             short.append({"date": d, "bars": len(s)})
     return full, short
@@ -217,9 +230,14 @@ def build_pool(sessions):
     """pool[i] = every past session's bar i as (o, h, l, c) / bar i-1's close, in date order."""
     pool = [[] for _ in range(SESSION_BARS)]
     for _, D in sessions:
-        for i in range(1, SESSION_BARS):
+        for i in range(1, len(D)):
             pc = D[i - 1]["c"]
             pool[i].append((D[i]["o"] / pc, D[i]["h"] / pc, D[i]["l"] / pc, D[i]["c"] / pc))
+    # a tail slot no session reached (15:20 on Yahoo) borrows the nearest earlier
+    # slot, so a replay past the flat-by time still has something to draw
+    for i in range(1, SESSION_BARS):
+        if not pool[i]:
+            pool[i] = pool[i - 1]
     return pool
 
 
@@ -337,8 +355,9 @@ def history_replay(sessions, rule, last, side="buy"):
     n = rule["or_minutes"] // 5
     trades = []
     for d, D in sessions:
+        L = min(last, len(D) - 1)       # a session may stop before --until (Yahoo's null tail)
         oh, ol = opening_range(D, n)
-        kk = next((i for i in range(n, last + 1) if (D[i]["c"] > oh if long else D[i]["c"] < ol)), None)
+        kk = next((i for i in range(n, L + 1) if (D[i]["c"] > oh if long else D[i]["c"] < ol)), None)
         if kk is None:
             continue
         e = round(D[kk]["c"], 2)
@@ -348,14 +367,14 @@ def history_replay(sessions, rule, last, side="buy"):
             continue
         t = round(e + rule["target_r"] * risk, 2) if long else round(e - rule["target_r"] * risk, 2)
         oc = None
-        for b in D[kk + 1:last + 1]:
+        for b in D[kk + 1:L + 1]:
             if (b["l"] <= s) if long else (b["h"] >= s):
                 oc = "stop"
                 break
             if (b["h"] >= t) if long else (b["l"] <= t):
                 oc = "target"
                 break
-        cl = D[last]["c"]
+        cl = D[L]["c"]
         R = ((t - e) if long else (e - t)) / risk if oc == "target" else -1.0 if oc == "stop" else \
             ((cl - e) if long else (e - cl)) / risk
         trades.append({"date": d, "time": clock12(OPEN_MIN + 5 * (kk + 1)), "entry": e, "stop": s, "target": t,
@@ -450,8 +469,9 @@ def normalize_plan(raw, src="flags"):
     if k is None:
         raise TMError("the plan needs entry_time (the entry bar's close, e.g. 10:15 AM) or entry_bar")
     if not 0 <= k <= SESSION_BARS - 2:
-        raise TMError("the entry must close between 9:35 AM and 3:55 PM to leave bars to replay "
-                      "(got %s)" % clock12(OPEN_MIN + 5 * (k + 1)))
+        raise TMError("the entry must close between %s and %s to leave bars to replay (got %s)"
+                      % (clock24(OPEN_MIN + 5), clock24(OPEN_MIN + 5 * (SESSION_BARS - 1)),
+                         clock24(OPEN_MIN + 5 * (k + 1))))
     orng = raw.get("opening_range") or {}
     or_min = orng.get("minutes", 15) if isinstance(orng, dict) else 15
     try:
@@ -505,7 +525,7 @@ def resolve_rule(plan, entry_day):
 # ---------------------------------------------------------------- the run
 
 def _until12(mc):
-    t = mc.get("until") or "16:00"
+    t = mc.get("until") or mkt.FLAT_BY.strftime("%H:%M")
     return clock12(int(t[:2]) * 60 + int(t[3:]))
 
 
@@ -608,7 +628,13 @@ def time_machine(series, plan, now_utc, replays=10000, seed=19, window=2, until=
     if special and special.get("close"):
         h, m = str(special["close"]).split(":")[:2]
         end_min = int(h) * 60 + int(m)
-    until_min = end_min if until is None else parse_clock(until, "--until")
+    if until is None:
+        # a path that hits neither level is closed at the flat-by time, not the
+        # session close: the skills are flat by then and the broker squares off after
+        until_min = parse_clock(plan.get("flat_by") or mkt.FLAT_BY.strftime("%H:%M"), "flat_by")
+        until_min = min(until_min, end_min)
+    else:
+        until_min = parse_clock(until, "--until")
     if (until_min - OPEN_MIN) % 5 or until_min > end_min:
         raise TMError("--until must be on the 5-minute grid and no later than %s%s"
                       % (clock12(end_min), " (a special session that day)" if early else ""))
@@ -870,7 +896,8 @@ def main(argv=None):
         p.add_argument("--replays", type=int, default=10000)
         p.add_argument("--seed", type=int, default=19)
         p.add_argument("--window", type=int, default=2, help="draw from the same time of day +- this many bars")
-        p.add_argument("--until", help="end each replay at this time (default 16:00, the close)")
+        p.add_argument("--until", help="end each replay at this IST time (default: the plan's flat_by, %s)"
+                       % mkt.FLAT_BY.strftime("%H:%M"))
         p.add_argument("--adapter", help="data adapter: yahoo (default), offline, kite, upstox, angel, dhan")
         p.add_argument("--data", metavar="DIR", help="folder of saved payloads, with --adapter offline")
         p.add_argument("--config", default="trader/config.json",

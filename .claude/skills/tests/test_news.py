@@ -185,8 +185,16 @@ class Cli(unittest.TestCase):
         self.assertIn("Nothing new", text)
 
     def test_the_unverified_warning_appears_on_a_live_run(self):
-        code, text, err = run("--tickers", "RELIANCE", "--now", "2026-11-02T04:00:00Z",
-                              "--no-moves")
+        # a "live" run with the network stubbed out: this test used to rely on
+        # the sandbox refusing nseindia.com, and hung for 30s once it was allowed
+        from unittest import mock
+
+        def refuse(self, url, name, sec=False):
+            raise news.NewsError("stubbed: no network in tests (%s)" % name)
+
+        with mock.patch.object(news.Fetcher, "get", refuse):
+            code, text, err = run("--tickers", "RELIANCE", "--now", "2026-11-02T04:00:00Z",
+                                  "--no-moves")
         self.assertIn("has not been exercised", text + err)
 
     def test_json_output(self):

@@ -19,7 +19,14 @@ for: whether the opening range starts at 09:15, whether square-off fires,
 whether costs land on the right leg, whether a stock at its circuit is
 skipped. It cannot tell you how a setup actually behaved on NSE.
 
-## Replacing them with real data
+## The real captures
+
+`real/` holds gzipped Yahoo payloads captured on 2026-11-07, with their own
+README. They are what showed that a real NSE session on Yahoo has 72 to 74
+five-minute bars, never the 75 these synthetic files have, which is why the
+completeness rule changed. Tests run on both folders.
+
+## Replacing the synthetic ones with real data
 
 The files are in the canonical adapter shape, and the `yahoo-*.json` one is a
 raw Yahoo payload, so a real capture is a drop-in replacement with no test

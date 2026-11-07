@@ -223,3 +223,60 @@ class BrokerAdapters(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RealCaptures(unittest.TestCase):
+    """Real Yahoo payloads from 2026-11-07 (tests/fixtures/india/real/README.md).
+    They carry no synthetic marker, and they are why the completeness rule is
+    "every bar up to the flat-by" rather than "all 75"."""
+
+    REAL = os.path.join(FIX, "real")
+
+    def real(self, sym, interval):
+        return ds.get_adapter("offline", directory=self.REAL).bars(sym, interval)
+
+    def test_the_real_files_are_not_marked_synthetic(self):
+        for sym, interval in (("RELIANCE", "5m"), ("TCS", "1m"), ("NIFTY50", "5m"), ("INDIAVIX", "5m")):
+            s = self.real(sym, interval)
+            self.assertFalse(s["meta"].get("synthetic"), "%s %s" % (sym, interval))
+            self.assertTrue(s["bars"], "%s %s" % (sym, interval))
+
+    def test_a_real_session_never_has_75_bars(self):
+        s = self.real("RELIANCE", "5m")
+        per = {}
+        for b in s["bars"]:
+            per.setdefault(mkt.ts_to_ist(b["t"]).date(), 0)
+            per[mkt.ts_to_ist(b["t"]).date()] += 1
+        self.assertEqual(len(per), 60)
+        self.assertEqual(set(per.values()), {72, 73, 74})
+
+    def test_full_sessions_keeps_real_days_complete_to_the_flat_by(self):
+        s = self.real("RELIANCE", "5m")
+        days = ds.full_sessions(s, 5)
+        self.assertEqual(len(days), 59)
+        self.assertNotIn(datetime.date(2026, 10, 15), [d for d, _ in days])   # 11:45 and 11:50 missing
+        for d, bars in days:
+            self.assertGreaterEqual(len(bars), mkt.required_bars(5))
+            self.assertEqual(mkt.ts_to_ist(bars[0]["t"]).time(), datetime.time(9, 15))
+            # contiguous from the open: bar i opens i*5 minutes after 09:15
+            for i, b in enumerate(bars):
+                self.assertEqual(b["t"] - bars[0]["t"], 300 * i, (d, i))
+
+    def test_the_real_minute_feed_loses_its_tail_too(self):
+        s = self.real("TCS", "1m")
+        self.assertEqual(len(s["bars"]), 361)                    # of 375
+        missing = sorted(set(range(375)) - set((mkt.ts_to_ist(b["t"]).hour * 60
+                                                + mkt.ts_to_ist(b["t"]).minute - 555) for b in s["bars"]))
+        self.assertEqual(missing, list(range(360, 374)))         # 15:15 to 15:28: the same null tail as 5m
+        days = ds.full_sessions(s, 1)
+        self.assertEqual(len(days), 1)                           # complete up to the 15:15 flat-by
+        self.assertEqual(len(days[0][1]), 360)
+
+    def test_an_index_closing_print_at_1530_is_outside_the_session(self):
+        s = self.real("NIFTY50", "5m")
+        last_day = max(mkt.ts_to_ist(b["t"]).date() for b in s["bars"])
+        inside = ds.session_bars(s, day=last_day)
+        self.assertEqual(len(inside), 75)
+        self.assertEqual(mkt.ts_to_ist(inside[-1]["t"]).time(), datetime.time(15, 25))
+        raw_last = max(b["t"] for b in s["bars"])
+        self.assertEqual(mkt.ts_to_ist(raw_last).time(), datetime.time(15, 30))   # present, and dropped
