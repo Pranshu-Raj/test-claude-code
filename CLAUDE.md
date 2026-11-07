@@ -34,8 +34,10 @@
   for capturing real fixtures and for interactive quotes, NEVER a data path:
   an MCP payload is written to a file verbatim and read back by the `offline`
   adapter, so the model never transcribes a number into a tool. The hosted
-  endpoint carries no order tools; if anyone self-hosts it, the order and GTT
-  tools stay in `EXCLUDED_TOOLS`. See `docs/how-it-works.md` section 3a.
+  server DOES carry `place_order` and five other order-mutating tools (checked
+  live, v0.3.2), so `.claude/settings.json` denies all six under
+  `permissions.deny`. Never remove an entry from that list, and never call a
+  Kite order tool by any route. See `docs/how-it-works.md` section 3a.
 - Costs are not cosmetic here. `max_loss_per_trade_inr` means the NET loss,
   charges included, so trader-budget sizes down accordingly. If you change
   anything in the sizing or risk path, keep that true.

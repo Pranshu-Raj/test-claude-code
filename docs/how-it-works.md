@@ -299,19 +299,25 @@ Claude in the room, and one mistyped digit becomes a position size. The
 supported pattern is a courier: the MCP payload is written to a file
 verbatim, and the `offline` adapter reads that file.
 
-**The order tools are the hard line.** The hosted endpoint already leaves out
-`place_order`, `modify_order` and `cancel_order`, which is exactly the
-posture this repo wants. If you ever self-host the server, set its
-`EXCLUDED_TOOLS` to cover the GTT tools too, which the upstream example
-omits:
+**The order tools are the hard line, and the hosted server has them.**
+Zerodha's README says the hosted endpoint leaves out destructive operations.
+Checked against the live server on 2026-11-07 (v0.3.2): it does not. Its 22
+tools include `place_order`, `modify_order`, `cancel_order`, `place_gtt_order`,
+`modify_gtt_order` and `delete_gtt_order`. Connected as-is, Claude would hold
+a tool that places a real order with none of the three approval gates: no
+trader-risk PASS for that fingerprint, no typed yes, no Allow once card.
+
+So `.claude/settings.json` denies those six tools by name under
+`permissions.deny`. Claude Code refuses to call a denied tool, whatever the
+prompt or the model says. Keep that list intact, and if the server adds a
+mutating tool, add it there. If you ever self-host the server, set its
+`EXCLUDED_TOOLS` as well, so the tools do not exist at all:
 
 ```
 EXCLUDED_TOOLS=place_order,modify_order,cancel_order,place_gtt_order,modify_gtt_order,delete_gtt_order
 ```
 
-Without that you are holding a tool that can place a real order with none of
-the three approval gates: no trader-risk PASS for that fingerprint, no typed
-yes, no Allow once card.
+Both layers, because one is in your hands and the other in Zerodha's.
 
 **It cannot run unattended.** Auth is a browser `login` per session, not an
 environment variable, so a pre-open scan on a timer still needs the `kite`
